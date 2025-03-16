@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:animate_do/animate_do.dart'; // Import animate_do package
 
-// Define API Base URL
 const String baseUrl = 'http://192.168.108.49:5000/api';
 
 class ServiceAdvisorDashboard extends StatefulWidget {
@@ -18,7 +18,7 @@ class ServiceAdvisorDashboard extends StatefulWidget {
   _ServiceAdvisorDashboardState createState() => _ServiceAdvisorDashboardState();
 }
 
-class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> {
+class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with TickerProviderStateMixin {
   bool isLoading = false;
   bool isScanning = false;
   bool isCameraOpen = false;
@@ -28,6 +28,22 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> {
   List<Map<String, dynamic>> additionalWorkStages = [];
 
   final TextEditingController _vehicleNumberController = TextEditingController();
+  late AnimationController _animationController;
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 500),
+      vsync: this,
+    );
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
 
   String convertToIST(String utcTimestamp) {
     final dateFormat = DateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
@@ -39,7 +55,7 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> {
   void handleQRCode(String code) async {
     if (isScanning) return;
     isScanning = true;
-    print('🚀 QR Code Scanned: $code');
+    print('QR Code Scanned: $code');
     _vehicleNumberController.text = code;
     await fetchVehicleDetails(code);
     Future.delayed(const Duration(seconds: 2), () => isScanning = false);
@@ -47,6 +63,8 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> {
 
   Future<void> fetchVehicleDetails(String vehicleNumber) async {
     setState(() => isLoading = true);
+    _animationController.reset();
+    _animationController.forward(); // Start animation
     final url = Uri.parse('$baseUrl/vehicles/$vehicleNumber');
 
     try {
@@ -59,7 +77,7 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> {
       );
 
       final data = json.decode(response.body);
-      print('📋 Vehicle Details: $data');
+      print('Vehicle Details: $data');
 
       if (data['success'] == true && data.containsKey('vehicle')) {
         setState(() {
@@ -72,7 +90,7 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> {
         });
       }
     } catch (error) {
-      print('❌ Error fetching vehicle details: $error');
+      print('Error fetching vehicle details: $error');
     } finally {
       setState(() => isLoading = false);
     }
@@ -81,6 +99,8 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> {
   Future<void> startJobCard() async {
     if (vehicleNumber == null) return;
     setState(() => isLoading = true);
+    _animationController.reset();
+    _animationController.forward(); // Start animation
 
     final url = Uri.parse('$baseUrl/vehicle-check');
     try {
@@ -101,12 +121,12 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> {
       final data = json.decode(response.body);
       if (data['success'] == true) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('✅ Job Card started')),
+          const SnackBar(content: Text('Job Card started')),
         );
         fetchVehicleDetails(vehicleNumber!);
       }
     } catch (error) {
-      print('❌ Error starting job card: $error');
+      print('Error starting job card: $error');
     } finally {
       setState(() => isLoading = false);
     }
@@ -115,6 +135,8 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> {
   Future<void> startAdditionalWork() async {
     if (vehicleNumber == null) return;
     setState(() => isLoading = true);
+    _animationController.reset();
+    _animationController.forward(); // Start animation
 
     final url = Uri.parse('$baseUrl/vehicle-check');
     try {
@@ -135,117 +157,209 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> {
       final data = json.decode(response.body);
       if (data['success'] == true) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('🚀 Additional Work started')),
+          const SnackBar(content: Text('Additional Work started')),
         );
         fetchVehicleDetails(vehicleNumber!);
       }
     } catch (error) {
-      print('❌ Error starting additional work: $error');
+      print('Error starting additional work: $error');
     } finally {
       setState(() => isLoading = false);
     }
+  }
+
+  Future<void> searchVehicle() async {
+    final vehicleNumber = _vehicleNumberController.text.trim();
+    if (vehicleNumber.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a vehicle number')),
+      );
+      return;
+    }
+
+    await fetchVehicleDetails(vehicleNumber);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Service Advisor Dashboard'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () {
-              if (vehicleNumber != null) fetchVehicleDetails(vehicleNumber!);
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: widget.onLogout,
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        backgroundColor: Colors.black,
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween, // Add this
           children: [
-            Card(
-              elevation: 4,
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        setState(() {
-                          isCameraOpen = !isCameraOpen;
-                        });
-                      },
-                      icon: Icon(isCameraOpen ? Icons.camera_alt : Icons.camera),
-                      label: Text(isCameraOpen ? 'Close Camera' : 'Open Camera'),
-                    ),
-                    const SizedBox(height: 10),
-                    if (isCameraOpen)
-                      SizedBox(
-                        height: 200,
-                        child: MobileScanner(
-                          onDetect: (capture) {
-                            final List<Barcode> barcodes = capture.barcodes;
-                            if (barcodes.isNotEmpty && barcodes.first.rawValue != null) {
-                              handleQRCode(barcodes.first.rawValue!);
-                            }
-                          },
-                        ),
-                      ),
-                  ],
+            Row(
+              children: [
+                Image.asset('assets/mercedes_logo.jpg', height: 40),
+                const SizedBox(width: 10),
+                const Text(
+                  'Service Advisor Dashboard',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white),
                 ),
-              ),
+              ],
             ),
-            const SizedBox(height: 20),
-            TextField(
-              controller: _vehicleNumberController,
-              decoration: const InputDecoration(
-                labelText: 'Vehicle Number',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.directions_car),
-              ),
-              readOnly: true,
-            ),
-            const SizedBox(height: 20),
-            Center(
-              child: ElevatedButton.icon(
-                onPressed: isLoading ? null : startJobCard,
-                icon: const Icon(Icons.play_arrow),
-                label: const Text('Start Job Card & Customer Approval'),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-              ),
-            ),
-            const SizedBox(height: 30),
-            Text('📌 Vehicle Stages', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 10),
-            stages.isEmpty
-                ? const Center(child: Text('No stages recorded'))
-                : ListView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: stages.length,
-                    itemBuilder: (context, index) {
-                      final stage = stages[index];
-                      return Card(
-                        child: ListTile(
-                          title: Text('📍 ${stage['stageName']}'),
-                          subtitle: Text('Time: ${convertToIST(stage['timestamp'])}'),
-                        ),
-                      );
-                    },
-                  ),
-            const SizedBox(height: 30),
-            ElevatedButton.icon(
-              onPressed: isLoading ? null : startAdditionalWork,
-              icon: const Icon(Icons.add),
-              label: const Text('Start Additional Work Approval'),
+            Row(
+              mainAxisSize: MainAxisSize.min, // Add this
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.refresh, color: Colors.white),
+                  onPressed: () {
+                    if (vehicleNumber != null) fetchVehicleDetails(vehicleNumber!);
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.logout, color: Colors.white),
+                  onPressed: widget.onLogout,
+                ),
+              ],
             ),
           ],
+        ),
+      ),
+      body: Container(
+        padding: const EdgeInsets.all(16.0),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Colors.black, Colors.grey.shade900],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Card(
+                elevation: 8,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                color: Colors.black,
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    children: [
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue.shade700,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            isCameraOpen = !isCameraOpen;
+                          });
+                        },
+                        icon: Icon(isCameraOpen ? Icons.camera_alt : Icons.camera, color: Colors.white),
+                        label: Text(isCameraOpen ? 'Close Camera' : 'Open Camera',
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      ),
+                      const SizedBox(height: 10),
+                      if (isCameraOpen)
+                        SizedBox(
+                          height: 200,
+                          child: MobileScanner(
+                            onDetect: (capture) {
+                              final List<Barcode> barcodes = capture.barcodes;
+                              if (barcodes.isNotEmpty && barcodes.first.rawValue != null) {
+                                handleQRCode(barcodes.first.rawValue!);
+                              }
+                            },
+                          ),
+                        ),
+                      TextField(
+                        controller: _vehicleNumberController,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          labelText: 'Enter Vehicle Number',
+                          labelStyle:
+                              const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                          filled: true,
+                          fillColor: Colors.grey.shade800,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          prefixIcon: const Icon(Icons.directions_car, color: Colors.white),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.amber.shade700,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: searchVehicle,
+                        icon: const Icon(Icons.search, color: Colors.black),
+                        label: const Text('Search Vehicle',
+                            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green.shade700,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    ),
+                    onPressed: isLoading ? null : startJobCard,
+                    icon: const Icon(Icons.assignment, color: Colors.white),
+                    label: const Text('Start Job Card',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  ),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue.shade700,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    ),
+                    onPressed: isLoading ? null : startAdditionalWork,
+                    icon: const Icon(Icons.add, color: Colors.white),
+                    label: const Text('Additional Work',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 30),
+              FadeInDown(
+                // Wrap the stages list with FadeInDown
+                animate: true,
+                controller: (controller) => _animationController = controller,
+                child: Text('Vehicle Stages',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleLarge!
+                        .copyWith(color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+              const SizedBox(height: 10),
+              stages.isEmpty
+                  ? const Center(
+                      child: Text('No stages recorded',
+                          style: TextStyle(color: Colors.white, fontSize: 16)))
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: stages.length,
+                      itemBuilder: (context, index) {
+                        final stage = stages[index];
+                        return Card(
+                          color: Colors.grey.shade800,
+                          elevation: 4,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                          child: ListTile(
+                            leading: const Icon(Icons.timeline, color: Colors.white),
+                            title: Text(stage['stageName'],
+                                style: const TextStyle(
+                                    color: Colors.white, fontWeight: FontWeight.bold)),
+                            subtitle: Text('Time: ${convertToIST(stage['timestamp'])}',
+                                style: const TextStyle(color: Colors.grey)),
+                          ),
+                        );
+                      },
+                    ),
+            ],
+          ),
         ),
       ),
     );

@@ -7,6 +7,8 @@ import 'screens/ServiceAdvisorDashboard.dart';
 import 'screens/JobControllerDashboard.dart';
 import 'screens/FinalInspectionDashboard.dart';
 import 'screens/WashingDashboard.dart';
+import 'screens/BayTechnicianDashboard.dart';
+import 'screens/AdminDashboard.dart';
 
 void main() {
   runApp(MyApp());
@@ -89,6 +91,14 @@ class _MyAppState extends State<MyApp> {
 
     if(role == "Washing Boy"){
       return WashingDashboard(token: token!, onLogout: _logout);
+    }
+
+    if(role == "Bay Technician"){
+      return BayTechnicianDashboard(token: token!, onLogout: _logout);
+    }
+
+    if(role == "Admin"){
+      return AdminDashboard(token: token!, onLogout: _logout);
     }
 
     return AuthScreen();

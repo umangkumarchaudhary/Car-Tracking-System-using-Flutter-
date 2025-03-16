@@ -1,25 +1,33 @@
 const mongoose = require("mongoose");
 
-// Define Schema for Each Stage Event
-const StageSchema = new mongoose.Schema({
-  stageName: { type: String, required: true },  // E.g., Security Gate, Interactive Bay
-  role: { type: String, required: true },       // Who performed the scan (Security, Technician, etc.)
-  eventType: { type: String, required: true },  // Entry, Exit, etc.
+const stageSchema = new mongoose.Schema({
+  stageName: { type: String, required: true },
+  role: { type: String, required: true },
+  eventType: { type: String, enum: ["Start", "End"], required: true },
   timestamp: { type: Date, default: Date.now },
-  inKM: { type: Number, default: null },        // ✅ Only for Security Entry
-  outKM: { type: Number, default: null },       // ✅ Only for Security Exit
-  inDriver: { type: String, default: null },    // ✅ Only for Security Entry
-  outDriver: { type: String, default: null },   // ✅ Only for Security Exit
+  inKM: { type: Number, default: null },
+  outKM: { type: Number, default: null },
+  inDriver: { type: String, default: null },
+  outDriver: { type: String, default: null },
+  workType: { 
+    type: String, 
+    enum: ["PM", "GR", "Body and Paint", "Diagnosis"], 
+    default: null 
+  },
+  bayNumber: { 
+    type: Number, 
+    min: 1, 
+    max: 15, 
+    default: null 
+  }
 });
 
-// Define Vehicle Schema (Tracks Full Journey)
-const VehicleSchema = new mongoose.Schema({
-  vehicleNumber: { type: String, required: true },
-  entryTime: { type: Date, required: true },
+const vehicleSchema = new mongoose.Schema({
+  vehicleNumber: { type: String, required: true, unique: false },
+  entryTime: { type: Date, default: Date.now },
   exitTime: { type: Date, default: null },
-  stages: [StageSchema],  // ✅ Stores all stage events in order
+  stages: [stageSchema]
 });
 
-const Vehicle = mongoose.model("Vehicle", VehicleSchema);
-
+const Vehicle = mongoose.model("Vehicle", vehicleSchema);
 module.exports = Vehicle;

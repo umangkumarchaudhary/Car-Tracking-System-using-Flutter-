@@ -5,7 +5,10 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../auth_app.dart';
-import 'package:intl/intl.dart'; // For date and time formatting
+import 'package:intl/intl.dart';
+import 'package:excel/excel.dart'; // Add this package for Excel functionality
+import 'dart:io';
+import 'package:path_provider/path_provider.dart'; // For file storage
 
 const String BASE_URL = "http://192.168.108.49:5000/api";
 
@@ -21,19 +24,18 @@ class SecurityGuardDashboard extends StatefulWidget {
 
 class _SecurityGuardDashboardState extends State<SecurityGuardDashboard> {
   String? scannedVehicleNumber;
-  String selectedAction = "Entry"; // Default action
+  String selectedAction = "Entry";
   TextEditingController kmController = TextEditingController();
   TextEditingController driverNameController = TextEditingController();
   List<Map<String, dynamic>> vehicleHistory = [];
-  String filterStatus = "All"; // Filter by status: All, Open, Closed
-
+  String filterStatus = "All";
   Timer? _pollingTimer;
 
   @override
   void initState() {
     super.initState();
     fetchVehicleHistory();
-    startPolling(); // ✅ Start real-time polling
+    startPolling();
   }
 
   @override
@@ -44,14 +46,12 @@ class _SecurityGuardDashboardState extends State<SecurityGuardDashboard> {
     super.dispose();
   }
 
-  // ✅ Real-time Polling every 5 seconds
   void startPolling() {
     _pollingTimer = Timer.periodic(Duration(seconds: 5), (timer) {
       fetchVehicleHistory();
     });
   }
 
-  // ✅ Fetch Vehicle History from Backend
   Future<void> fetchVehicleHistory() async {
     try {
       final response = await http.get(
@@ -68,21 +68,19 @@ class _SecurityGuardDashboardState extends State<SecurityGuardDashboard> {
           vehicleHistory = List<Map<String, dynamic>>.from(data["vehicles"] ?? []);
         });
       } else {
-        print("❌ Failed to load vehicle history: ${response.body}");
+        print("Failed to load vehicle history: ${response.body}");
       }
     } catch (error) {
-      print("❌ Error fetching vehicle history: $error");
+      print("Error fetching vehicle history: $error");
     }
   }
 
-  // ✅ Handle QR Scan
   void handleScan(String qrCode) {
     setState(() {
       scannedVehicleNumber = qrCode;
     });
   }
 
-  // ✅ Submit Entry/Exit Data
   Future<void> submitData() async {
     String vehicleNumber = scannedVehicleNumber ?? "";
     String kmValue = kmController.text.trim();
@@ -95,6 +93,8 @@ class _SecurityGuardDashboardState extends State<SecurityGuardDashboard> {
       return;
     }
 
+    String eventType = selectedAction == "Entry" ? "Start" : "End";
+
     try {
       final response = await http.post(
         Uri.parse('$BASE_URL/vehicle-check'),
@@ -106,7 +106,7 @@ class _SecurityGuardDashboardState extends State<SecurityGuardDashboard> {
           "vehicleNumber": vehicleNumber,
           "role": "Security Guard",
           "stageName": "Security Gate",
-          "eventType": selectedAction,
+          "eventType": eventType,
           "inKM": selectedAction == "Entry" ? kmValue : null,
           "outKM": selectedAction == "Exit" ? kmValue : null,
           "inDriver": selectedAction == "Entry" ? driverName : null,
@@ -118,15 +118,14 @@ class _SecurityGuardDashboardState extends State<SecurityGuardDashboard> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Vehicle $selectedAction recorded successfully!")),
         );
-        fetchVehicleHistory(); // Refresh vehicle history
+        fetchVehicleHistory();
       } else {
-        print("❌ Failed to submit data: ${response.body}");
+        print("Failed to submit data: ${response.body}");
       }
     } catch (e) {
-      print("❌ Error submitting data: $e");
+      print("Error submitting data: $e");
     }
 
-    // ✅ Clear form after submission
     setState(() {
       scannedVehicleNumber = null;
       kmController.clear();
@@ -134,14 +133,12 @@ class _SecurityGuardDashboardState extends State<SecurityGuardDashboard> {
     });
   }
 
-  // ✅ Logout Function
   void logout() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.clear(); // ✅ Clear token & role
-    widget.onLogout(); // ✅ Call parent logout function
+    await prefs.clear();
+    widget.onLogout();
   }
 
-  // ✅ Filter vehicles by status
   List<Map<String, dynamic>> getFilteredVehicles() {
     if (filterStatus == "All") {
       return vehicleHistory;
@@ -154,7 +151,6 @@ class _SecurityGuardDashboardState extends State<SecurityGuardDashboard> {
     }
   }
 
-  // ✅ Group vehicles by date
   Map<String, List<Map<String, dynamic>>> groupVehiclesByDate(List<Map<String, dynamic>> vehicles) {
     Map<String, List<Map<String, dynamic>>> groupedVehicles = {};
     for (var vehicle in vehicles) {
@@ -167,7 +163,6 @@ class _SecurityGuardDashboardState extends State<SecurityGuardDashboard> {
     return groupedVehicles;
   }
 
-  // ✅ Format date to DD/MM/YYYY
   String formatDate(String dateTimeString) {
     try {
       DateTime dateTime = DateTime.parse(dateTimeString);
@@ -177,7 +172,6 @@ class _SecurityGuardDashboardState extends State<SecurityGuardDashboard> {
     }
   }
 
-  // ✅ Format time to 12-hour Indian time format
   String formatTime(String dateTimeString) {
     try {
       DateTime dateTime = DateTime.parse(dateTimeString);
@@ -187,32 +181,89 @@ class _SecurityGuardDashboardState extends State<SecurityGuardDashboard> {
     }
   }
 
+  Future<void> downloadExcelFile() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$BASE_URL/vehicles?role=Security Guard'),
+        headers: {
+          'Authorization': 'Bearer ${widget.token}',
+          'Content-Type': 'application/json',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        List<Map<String, dynamic>> securityGuardEntries =
+            List<Map<String, dynamic>>.from(data["vehicles"] ?? []);
+
+        // Create an Excel file
+        var excel = Excel.createExcel();
+        Sheet sheetObject = excel['SecurityGuardData'];
+
+        // Add headers
+        sheetObject.appendRow([
+          "Vehicle Number",
+          "Entry Time",
+          "Exit Time",
+          "Entry KM",
+          "Exit KM",
+          "Driver Name"
+        ]);
+
+        // Add data rows
+        for (var entry in securityGuardEntries) {
+          sheetObject.appendRow([
+            entry['vehicleNumber'] ?? '',
+            entry['entryTime'] ?? '',
+            entry['exitTime'] ?? '',
+            entry['inKM'] ?? '',
+            entry['outKM'] ?? '',
+            entry['inDriver'] ?? ''
+          ]);
+        }
+
+        // Save file to temporary directory
+        Directory tempDir = await getTemporaryDirectory();
+        String tempPath = tempDir.path;
+        File file = File('$tempPath/SecurityGuardData.xlsx');
+        file.writeAsBytesSync(excel.encode()!);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Excel file downloaded to $tempPath")),
+        );
+      } else {
+        print("Failed to fetch security guard data: ${response.body}");
+      }
+    } catch (e) {
+      print("Error downloading Excel file: $e");
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Filter and group vehicles
     final filteredVehicles = getFilteredVehicles();
     final groupedVehicles = groupVehiclesByDate(filteredVehicles);
 
     return Scaffold(
-      backgroundColor: Colors.black, // Black background
+      backgroundColor: Colors.black,
       appBar: AppBar(
-        backgroundColor: Colors.black, // Black app bar
+        backgroundColor: Colors.black,
         title: Text(
           "Security Guard Dashboard",
           style: TextStyle(
-            color: Colors.white, // White text
-            fontFamily: 'MercedesBenz', // Use Mercedes-Benz font if available
+            color: Colors.white,
+            fontFamily: 'MercedesBenz',
             fontWeight: FontWeight.bold,
           ),
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.refresh, color: Colors.white), // White refresh icon
-            onPressed: fetchVehicleHistory, // ✅ Refresh button
+            icon: Icon(Icons.refresh, color: Colors.white),
+            onPressed: fetchVehicleHistory,
           ),
           IconButton(
-            icon: Icon(Icons.logout, color: Colors.white), // White logout icon
-            onPressed: logout, // ✅ Logout button
+            icon: Icon(Icons.logout, color: Colors.white),
+            onPressed: logout,
           ),
         ],
       ),
@@ -220,24 +271,38 @@ class _SecurityGuardDashboardState extends State<SecurityGuardDashboard> {
         padding: EdgeInsets.all(16.0),
         child: Column(
           children: [
-            // ✅ QR Scanner Button
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white, // White button
-                foregroundColor: Colors.black, // Black text
+                backgroundColor: Colors.green,
                 padding: EdgeInsets.symmetric(vertical: 15, horizontal: 30),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10), // Rounded corners
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              onPressed: downloadExcelFile,
+              child: Text("Download Security Guard Data"),
+            ),
+
+            SizedBox(height: 20),
+
+            // QR Scanner Button
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blueAccent,
+                foregroundColor: Colors.white,
+                padding: EdgeInsets.symmetric(vertical: 15, horizontal: 30),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
                 ),
               ),
               onPressed: () {
                 showDialog(
                   context: context,
                   builder: (context) => AlertDialog(
-                    backgroundColor: Colors.black, // Black background
+                    backgroundColor: Colors.black,
                     title: Text(
                       "Scan Vehicle QR",
-                      style: TextStyle(color: Colors.white), // White text
+                      style: TextStyle(color: Colors.white),
                     ),
                     content: Container(
                       height: 300,
@@ -261,26 +326,26 @@ class _SecurityGuardDashboardState extends State<SecurityGuardDashboard> {
 
             SizedBox(height: 20),
 
-            // ✅ Display Scanned Vehicle Number
+            // Display Scanned Vehicle Number
             TextField(
               controller: TextEditingController(text: scannedVehicleNumber),
               readOnly: true,
-              style: TextStyle(color: Colors.white), // White text
+              style: TextStyle(color: Colors.white),
               decoration: InputDecoration(
                 labelText: "Scanned Vehicle Number",
-                labelStyle: TextStyle(color: Colors.white), // White label
+                labelStyle: TextStyle(color: Colors.white),
                 enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: Colors.white), // White border
+                  borderSide: BorderSide(color: Colors.white),
                 ),
                 focusedBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: Colors.white), // White border
+                  borderSide: BorderSide(color: Colors.white),
                 ),
               ),
             ),
 
             SizedBox(height: 20),
 
-            // ✅ Entry/Exit Dropdown
+            // Entry/Exit Dropdown
             DropdownButtonFormField<String>(
               value: selectedAction,
               items: ["Entry", "Exit"].map((String action) {
@@ -288,7 +353,7 @@ class _SecurityGuardDashboardState extends State<SecurityGuardDashboard> {
                   value: action,
                   child: Text(
                     action,
-                    style: TextStyle(color: Colors.white), // White text
+                    style: TextStyle(color: Colors.white),
                   ),
                 );
               }).toList(),
@@ -297,63 +362,63 @@ class _SecurityGuardDashboardState extends State<SecurityGuardDashboard> {
                   selectedAction = value!;
                 });
               },
-              dropdownColor: Colors.black, // Black dropdown background
+              dropdownColor: Colors.black,
               decoration: InputDecoration(
                 labelText: "Select Action",
-                labelStyle: TextStyle(color: Colors.white), // White label
+                labelStyle: TextStyle(color: Colors.white),
                 enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: Colors.white), // White border
+                  borderSide: BorderSide(color: Colors.white),
                 ),
                 focusedBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: Colors.white), // White border
+                  borderSide: BorderSide(color: Colors.white),
                 ),
               ),
             ),
 
             SizedBox(height: 20),
 
-            // ✅ IN KM and Driver Name Fields
+            // IN KM and Driver Name Fields
             TextField(
               controller: kmController,
               keyboardType: TextInputType.number,
-              style: TextStyle(color: Colors.white), // White text
+              style: TextStyle(color: Colors.white),
               decoration: InputDecoration(
                 labelText: "${selectedAction} KM",
-                labelStyle: TextStyle(color: Colors.white), // White label
+                labelStyle: TextStyle(color: Colors.white),
                 enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: Colors.white), // White border
+                  borderSide: BorderSide(color: Colors.white),
                 ),
                 focusedBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: Colors.white), // White border
+                  borderSide: BorderSide(color: Colors.white),
                 ),
               ),
             ),
             SizedBox(height: 10),
             TextField(
               controller: driverNameController,
-              style: TextStyle(color: Colors.white), // White text
+              style: TextStyle(color: Colors.white),
               decoration: InputDecoration(
                 labelText: "Driver Name",
-                labelStyle: TextStyle(color: Colors.white), // White label
+                labelStyle: TextStyle(color: Colors.white),
                 enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: Colors.white), // White border
+                  borderSide: BorderSide(color: Colors.white),
                 ),
                 focusedBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: Colors.white), // White border
+                  borderSide: BorderSide(color: Colors.white),
                 ),
               ),
             ),
 
             SizedBox(height: 20),
 
-            // ✅ Submit Button
+            // Submit Button
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white, // White button
-                foregroundColor: Colors.black, // Black text
+                backgroundColor: Colors.blueAccent,
+                foregroundColor: Colors.white,
                 padding: EdgeInsets.symmetric(vertical: 15, horizontal: 30),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10), // Rounded corners
+                  borderRadius: BorderRadius.circular(10),
                 ),
               ),
               onPressed: submitData,
@@ -362,7 +427,7 @@ class _SecurityGuardDashboardState extends State<SecurityGuardDashboard> {
 
             SizedBox(height: 20),
 
-            // ✅ Filter Buttons
+            // Filter Buttons
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
@@ -407,7 +472,7 @@ class _SecurityGuardDashboardState extends State<SecurityGuardDashboard> {
 
             SizedBox(height: 20),
 
-            // ✅ Vehicle History Section
+            // Vehicle History Section
             Expanded(
               child: ListView(
                 children: groupedVehicles.entries.map((entry) {
@@ -424,45 +489,52 @@ class _SecurityGuardDashboardState extends State<SecurityGuardDashboard> {
                     ),
                     children: vehicles.map((vehicle) {
                       return Card(
-                        color: Colors.grey[900], // Dark grey card background
+                        color: Colors.grey[900],
                         child: ListTile(
                           title: Text(
                             "Vehicle: ${vehicle['vehicleNumber'] ?? 'Unknown'}",
-                            style: TextStyle(color: Colors.white), // White text
+                            style: TextStyle(color: Colors.white),
                           ),
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
                                 "Entry Time: ${formatTime(vehicle['entryTime'] ?? 'N/A')}",
-                                style: TextStyle(color: Colors.white), // White text
+                                style: TextStyle(color: Colors.white),
                               ),
-                              Text(
-                                "IN KM: ${vehicle['stages'][0]['inKM'] ?? 'N/A'}",
-                                style: TextStyle(color: Colors.white), // White text
-                              ),
-                              Text(
-                                "IN Driver: ${vehicle['stages'][0]['inDriver'] ?? 'N/A'}",
-                                style: TextStyle(color: Colors.white), // White text
-                              ),
-                              if (vehicle['exitTime'] != null) ...[
+                              if (vehicle['exitTime'] == null) ...[
+                                // Open Section: Display inKM and inDriver
+                                vehicle['inKM'] != null ? Text(
+                                  "Entry KM: ${vehicle['inKM']}",
+                                  style: TextStyle(color: Colors.white),
+                                ) : SizedBox.shrink(),
+                                vehicle['inDriver'] != null ? Text(
+                                  "Entry Driver: ${vehicle['inDriver']}",
+                                  style: TextStyle(color: Colors.white),
+                                ) : SizedBox.shrink(),
+                              ] else ...[
+                                // Closed Section: Display inKM, inDriver, outKM, outDriver, and Exit Time
+                                vehicle['inKM'] != null ? Text(
+                                  "Entry KM: ${vehicle['inKM']}",
+                                  style: TextStyle(color: Colors.white),
+                                ) : SizedBox.shrink(),
+                                vehicle['inDriver'] != null ? Text(
+                                  "Entry Driver: ${vehicle['inDriver']}",
+                                  style: TextStyle(color: Colors.white),
+                                ) : SizedBox.shrink(),
+                                vehicle['outKM'] != null ? Text(
+                                  "Exit KM: ${vehicle['outKM']}",
+                                  style: TextStyle(color: Colors.white),
+                                ) : SizedBox.shrink(),
+                                vehicle['outDriver'] != null ? Text(
+                                  "Exit Driver: ${vehicle['outDriver']}",
+                                  style: TextStyle(color: Colors.white),
+                                ) : SizedBox.shrink(),
                                 Text(
                                   "Exit Time: ${formatTime(vehicle['exitTime'] ?? 'N/A')}",
-                                  style: TextStyle(color: Colors.white), // White text
-                                ),
-                                Text(
-                                  "OUT KM: ${vehicle['stages'][0]['outKM'] ?? 'N/A'}",
-                                  style: TextStyle(color: Colors.white), // White text
-                                ),
-                                Text(
-                                  "OUT Driver: ${vehicle['stages'][0]['outDriver'] ?? 'N/A'}",
-                                  style: TextStyle(color: Colors.white), // White text
+                                  style: TextStyle(color: Colors.white),
                                 ),
                               ],
-                              Text(
-                                "Status: ${vehicle['exitTime'] == null ? 'Open' : 'Closed'}",
-                                style: TextStyle(color: Colors.white), // White text
-                              ),
                             ],
                           ),
                         ),

@@ -7,7 +7,7 @@ router.post("/vehicle-check", async (req, res) => {
   console.log("🔹 Incoming Request Data:", req.body);
 
   try {
-    const { vehicleNumber, role, stageName, eventType, inKM, outKM, inDriver, outDriver } = req.body;
+    const { vehicleNumber, role, stageName, eventType, inKM, outKM, inDriver, outDriver, workType, bayNumber } = req.body;
 
     if (!vehicleNumber || !role || !stageName || !eventType) {
       console.log("❌ Missing required fields");
@@ -35,6 +35,8 @@ router.post("/vehicle-check", async (req, res) => {
             outKM: role === "Security Guard" && eventType === "Exit" ? outKM : null,
             inDriver: role === "Security Guard" && eventType === "Entry" ? inDriver : null,
             outDriver: role === "Security Guard" && eventType === "Exit" ? outDriver : null,
+            workType: role === "Bay Technician" && eventType === "Start" ? workType || null : null,
+            bayNumber: role === "Bay Technician" && eventType === "Start" ? bayNumber || null : null,
           },
         ],
       });
@@ -65,6 +67,8 @@ router.post("/vehicle-check", async (req, res) => {
         role,
         eventType: "Start",
         timestamp: new Date(),
+        workType: role === "Bay Technician" ? workType || null : null,
+        bayNumber: role === "Bay Technician" ? bayNumber || null : null,
       });
 
       await vehicle.save();
@@ -158,18 +162,7 @@ router.get("/vehicles/bay-allocation-in-progress", async (req, res) => {
   }
 });
 
-router.get("/vehicles/final-inspection-in-progress", async (req, res) => {
-  try {
-    const vehicles = await Vehicle.find({
-      "stages.stageName": "Final Inspection Started",
-    });
 
-    return res.json({ success: true, vehicles });
-  } catch (error) {
-    console.error("Error fetching ongoing Final Inspection jobs:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
-  }
-});
 
 
 router.get("/finished-interactive-bay", async (req, res) => {

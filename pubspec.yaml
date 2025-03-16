@@ -32,7 +32,12 @@ dependencies:
     sdk: flutter
   http: ^1.3.0
   intl: ^0.20.2
+  fl_chart: ^0.63.0
   shared_preferences: ^2.2.2  # Ensure latest version is used
+  excel: ^2.1.0  # Ensure you use the latest version
+  path_provider: ^2.1.2  # Ensure you use the latest version
+  animate_do: ^3.1.2 
+ 
 
 
   # The following adds the Cupertino Icons font to your application.
@@ -57,11 +62,13 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
+  uses-material-design: true
+  assets:
+    - assets/mercedes_logo.jpg
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.
-  uses-material-design: true
 
   # To add assets to your application, add an assets section, like this:
   # assets:
