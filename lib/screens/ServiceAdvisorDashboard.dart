@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:animate_do/animate_do.dart'; // Import animate_do package
+import 'package:animate_do/animate_do.dart';
 
 const String baseUrl = 'http://192.168.108.49:5000/api';
 
@@ -20,15 +20,18 @@ class ServiceAdvisorDashboard extends StatefulWidget {
 
 class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with TickerProviderStateMixin {
   bool isLoading = false;
-  bool isScanning = false;
   bool isCameraOpen = false;
   String? vehicleId;
   String? vehicleNumber;
-  List<Map<String, dynamic>> stages = [];
+  String? searchedVehicleNumber;
+  List<Map<String, dynamic>> scannedStages = [];
+  List<Map<String, dynamic>> searchedStages = [];
   List<Map<String, dynamic>> additionalWorkStages = [];
-
-  final TextEditingController _vehicleNumberController = TextEditingController();
+  List<Map<String, dynamic>> stages = [];
+  final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _scannedVehicleController = TextEditingController();
   late AnimationController _animationController;
+  bool showSearchStages = false;
 
   @override
   void initState() {
@@ -42,6 +45,8 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
   @override
   void dispose() {
     _animationController.dispose();
+    _searchController.dispose();
+    _scannedVehicleController.dispose();
     super.dispose();
   }
 
@@ -52,24 +57,14 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
     return DateFormat('dd-MM-yyyy hh:mm a').format(istTime);
   }
 
-  void handleQRCode(String code) async {
-    if (isScanning) return;
-    isScanning = true;
-    print('QR Code Scanned: $code');
-    _vehicleNumberController.text = code;
-    await fetchVehicleDetails(code);
-    Future.delayed(const Duration(seconds: 2), () => isScanning = false);
-  }
-
-  Future<void> fetchVehicleDetails(String vehicleNumber) async {
+  Future<void> fetchVehicleDetails(String vehicleNumber, {bool isQRScan = false}) async {
     setState(() => isLoading = true);
     _animationController.reset();
-    _animationController.forward(); // Start animation
-    final url = Uri.parse('$baseUrl/vehicles/$vehicleNumber');
+    _animationController.forward();
 
     try {
       final response = await http.get(
-        url,
+        Uri.parse('$baseUrl/vehicles/$vehicleNumber'),
         headers: {
           'Authorization': 'Bearer ${widget.token}',
           'Content-Type': 'application/json',
@@ -77,20 +72,58 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
       );
 
       final data = json.decode(response.body);
-      print('Vehicle Details: $data');
 
-      if (data['success'] == true && data.containsKey('vehicle')) {
-        setState(() {
-          vehicleId = data['vehicle']['_id'];
-          this.vehicleNumber = vehicleNumber;
-          stages = List<Map<String, dynamic>>.from(data['vehicle']['stages']);
-          additionalWorkStages = stages
-              .where((stage) => stage['stageName'] == 'Additional Work Job Approval')
-              .toList();
-        });
+      if (isQRScan) {
+        // Handle QR Scan case
+        if (data['success'] == true && data.containsKey('vehicle')) {
+          setState(() {
+            vehicleId = data['vehicle']['_id'];
+            this.vehicleNumber = vehicleNumber;
+            _scannedVehicleController.text = vehicleNumber;
+            scannedStages = List<Map<String, dynamic>>.from(data['vehicle']['stages']);
+            stages = List<Map<String, dynamic>>.from(data['vehicle']['stages']);
+          });
+        } else {
+          // If vehicle doesn't exist, still set the vehicleNumber and clear other data
+          setState(() {
+            vehicleId = null;
+            this.vehicleNumber = vehicleNumber;
+            _scannedVehicleController.text = vehicleNumber;
+            scannedStages = [];
+            stages = []; // Clear stages
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Vehicle not found. Proceeding with the new vehicle entry.')),
+          );
+        }
+      } else {
+        // Handle Search case
+        if (data['success'] == true && data.containsKey('vehicle')) {
+          setState(() {
+            searchedVehicleNumber = vehicleNumber;
+            searchedStages = List<Map<String, dynamic>>.from(data['vehicle']['stages']);
+          });
+        } else {
+          setState(() {
+            searchedVehicleNumber = vehicleNumber;
+            searchedStages = [];
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Vehicle not found.')),
+          );
+        }
       }
+
+      //Common logic to set additionalWorkStages always
+      additionalWorkStages = stages
+          .where((stage) => stage['stageName'] == 'Additional Work Job Approval')
+          .toList();
+
     } catch (error) {
       print('Error fetching vehicle details: $error');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error fetching vehicle details. Please try again.')),
+      );
     } finally {
       setState(() => isLoading = false);
     }
@@ -100,7 +133,7 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
     if (vehicleNumber == null) return;
     setState(() => isLoading = true);
     _animationController.reset();
-    _animationController.forward(); // Start animation
+    _animationController.forward();
 
     final url = Uri.parse('$baseUrl/vehicle-check');
     try {
@@ -123,7 +156,8 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Job Card started')),
         );
-        fetchVehicleDetails(vehicleNumber!);
+        // Fetch the updated vehicle details after starting the job card
+        fetchVehicleDetails(vehicleNumber!, isQRScan: true);
       }
     } catch (error) {
       print('Error starting job card: $error');
@@ -136,7 +170,7 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
     if (vehicleNumber == null) return;
     setState(() => isLoading = true);
     _animationController.reset();
-    _animationController.forward(); // Start animation
+    _animationController.forward();
 
     final url = Uri.parse('$baseUrl/vehicle-check');
     try {
@@ -159,7 +193,8 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Additional Work started')),
         );
-        fetchVehicleDetails(vehicleNumber!);
+        // Fetch the updated vehicle details after starting additional work
+        fetchVehicleDetails(vehicleNumber!, isQRScan: true);
       }
     } catch (error) {
       print('Error starting additional work: $error');
@@ -168,25 +203,13 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
     }
   }
 
-  Future<void> searchVehicle() async {
-    final vehicleNumber = _vehicleNumberController.text.trim();
-    if (vehicleNumber.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a vehicle number')),
-      );
-      return;
-    }
-
-    await fetchVehicleDetails(vehicleNumber);
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.black,
         title: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween, // Add this
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Row(
               children: [
@@ -199,14 +222,9 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
               ],
             ),
             Row(
-              mainAxisSize: MainAxisSize.min, // Add this
+              mainAxisSize: MainAxisSize.min,
               children: [
-                IconButton(
-                  icon: const Icon(Icons.refresh, color: Colors.white),
-                  onPressed: () {
-                    if (vehicleNumber != null) fetchVehicleDetails(vehicleNumber!);
-                  },
-                ),
+                 // Removed refresh button
                 IconButton(
                   icon: const Icon(Icons.logout, color: Colors.white),
                   onPressed: widget.onLogout,
@@ -227,137 +245,289 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
         ),
         child: SingleChildScrollView(
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              /// QR Scan Section
               Card(
                 elevation: 8,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                color: Colors.black,
+                color: Colors.grey.shade800,
                 child: Padding(
                   padding: const EdgeInsets.all(16.0),
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue.shade700,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      const Text(
+                        "QR CODE SCANNER",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
                         ),
-                        onPressed: () {
-                          setState(() {
-                            isCameraOpen = !isCameraOpen;
-                          });
-                        },
-                        icon: Icon(isCameraOpen ? Icons.camera_alt : Icons.camera, color: Colors.white),
-                        label: Text(isCameraOpen ? 'Close Camera' : 'Open Camera',
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                       ),
+                      const Divider(color: Colors.white54),
                       const SizedBox(height: 10),
-                      if (isCameraOpen)
-                        SizedBox(
-                          height: 200,
-                          child: MobileScanner(
-                            onDetect: (capture) {
-                              final List<Barcode> barcodes = capture.barcodes;
-                              if (barcodes.isNotEmpty && barcodes.first.rawValue != null) {
-                                handleQRCode(barcodes.first.rawValue!);
-                              }
-                            },
+                      Center(
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue.shade700,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          ),
+                          onPressed: () => setState(() => isCameraOpen = !isCameraOpen),
+                          icon: Icon(
+                            isCameraOpen ? Icons.no_photography : Icons.qr_code_scanner,
+                            color: Colors.white,
+                            size: 28,
+                          ),
+                          label: Text(
+                            isCameraOpen ? 'CLOSE SCANNER' : 'SCAN VEHICLE QR',
+                            style: const TextStyle(color: Colors.white, fontSize: 16),
                           ),
                         ),
-                      TextField(
-                        controller: _vehicleNumberController,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: InputDecoration(
-                          labelText: 'Enter Vehicle Number',
-                          labelStyle:
-                              const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                          filled: true,
-                          fillColor: Colors.grey.shade800,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                          prefixIcon: const Icon(Icons.directions_car, color: Colors.white),
+                      ),
+                      const SizedBox(height: 15),
+                      if (isCameraOpen)
+                        Container(
+                          height: 220,
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.blue.shade700, width: 2),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: MobileScanner(
+                              onDetect: (capture) {
+                                final barcodes = capture.barcodes;
+                                if (barcodes.isNotEmpty) {
+                                  fetchVehicleDetails(barcodes.first.rawValue!, isQRScan: true);
+                                  setState(() => isCameraOpen = false);
+                                }
+                              },
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 15),
+                      // Read-only field for scanned vehicle number
+                      const Text(
+                        "SCANNED VEHICLE",
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                      const SizedBox(height: 10),
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.amber.shade700,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade900,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.blue.shade700),
                         ),
-                        onPressed: searchVehicle,
-                        icon: const Icon(Icons.search, color: Colors.black),
-                        label: const Text('Search Vehicle',
-                            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.directions_car, color: Colors.white70),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                _scannedVehicleController.text.isEmpty
+                                    ? "No vehicle scanned"
+                                    : _scannedVehicleController.text,
+                                style: TextStyle(
+                                  color: _scannedVehicleController.text.isEmpty
+                                      ? Colors.grey
+                                      : Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: _scannedVehicleController.text.isEmpty
+                                      ? FontWeight.normal
+                                      : FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
+                      const SizedBox(height: 16),
+                      if (scannedStages.isNotEmpty) ...[
+                        const Text(
+                          "SCANNED VEHICLE STAGES",
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: scannedStages.length,
+                          itemBuilder: (context, index) {
+                            final stage = scannedStages[index];
+                            return Card(
+                              color: Colors.grey.shade700,
+                              elevation: 2,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              child: ListTile(
+                                leading: const Icon(Icons.timeline, color: Colors.white70),
+                                title: Text(stage['stageName'], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                subtitle: Text('Time: ${convertToIST(stage['timestamp'])}', style: const TextStyle(color: Colors.grey)),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
                     ],
                   ),
                 ),
               ),
+
               const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green.shade700,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+
+              /// Action Buttons
+              if (vehicleNumber != null)
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green.shade700,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: isLoading ? null : startJobCard,
+                      icon: const Icon(Icons.assignment, color: Colors.white),
+                      label: const Text('Start Job Card', style: TextStyle(color: Colors.white)),
                     ),
-                    onPressed: isLoading ? null : startJobCard,
-                    icon: const Icon(Icons.assignment, color: Colors.white),
-                    label: const Text('Start Job Card',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  ),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue.shade700,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue.shade700,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: isLoading ? null : startAdditionalWork,
+                      icon: const Icon(Icons.add, color: Colors.white),
+                      label: const Text('Additional Work', style: TextStyle(color: Colors.white)),
                     ),
-                    onPressed: isLoading ? null : startAdditionalWork,
-                    icon: const Icon(Icons.add, color: Colors.white),
-                    label: const Text('Additional Work',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  ),
-                ],
+                  ],
+                ),
+
+              const SizedBox(height: 20),
+
+              ElevatedButton(
+                onPressed: () {
+                  setState(() {
+                    showSearchStages = !showSearchStages;
+                    if (!showSearchStages) {
+                      // Clear search results when closing the search section
+                      searchedVehicleNumber = null;
+                      searchedStages = [];
+                      _searchController.clear();
+                    }
+                  });
+                },
+                child: Text(showSearchStages ? 'Close Search' : 'Search Vehicle'),
               ),
-              const SizedBox(height: 30),
-              FadeInDown(
-                // Wrap the stages list with FadeInDown
-                animate: true,
-                controller: (controller) => _animationController = controller,
-                child: Text('Vehicle Stages',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleLarge!
-                        .copyWith(color: Colors.white, fontWeight: FontWeight.bold)),
-              ),
-              const SizedBox(height: 10),
-              stages.isEmpty
-                  ? const Center(
-                      child: Text('No stages recorded',
-                          style: TextStyle(color: Colors.white, fontSize: 16)))
-                  : ListView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: stages.length,
-                      itemBuilder: (context, index) {
-                        final stage = stages[index];
-                        return Card(
-                          color: Colors.grey.shade800,
-                          elevation: 4,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
-                          child: ListTile(
-                            leading: const Icon(Icons.timeline, color: Colors.white),
-                            title: Text(stage['stageName'],
-                                style: const TextStyle(
-                                    color: Colors.white, fontWeight: FontWeight.bold)),
-                            subtitle: Text('Time: ${convertToIST(stage['timestamp'])}',
-                                style: const TextStyle(color: Colors.grey)),
+
+              /// Vehicle Search Section
+              if (showSearchStages)
+                Card(
+                  elevation: 8,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  color: Colors.grey.shade700,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          "SEARCH VEHICLE",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
                           ),
-                        );
-                      },
+                        ),
+                        const Divider(color: Colors.white54),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: _searchController,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: InputDecoration(
+                            labelText: 'Enter Vehicle Number',
+                            labelStyle: const TextStyle(color: Colors.white70),
+                            hintText: 'e.g., KA01AB1234',
+                            hintStyle: TextStyle(color: Colors.grey.shade400),
+                            filled: true,
+                            fillColor: Colors.grey.shade800,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide.none,
+                            ),
+                            prefixIcon: const Icon(Icons.search, color: Colors.amber),
+                            suffixIcon: IconButton(
+                              icon: const Icon(Icons.clear, color: Colors.white70),
+                              onPressed: () => _searchController.clear(),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(color: Colors.amber.shade700, width: 2),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Center(
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.amber.shade700,
+                              foregroundColor: Colors.black,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                            ),
+                            onPressed: () {
+                              if (_searchController.text.isNotEmpty) {
+                                fetchVehicleDetails(_searchController.text.trim());
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Please enter a vehicle number')),
+                                );
+                              }
+                            },
+                            child: const Text('Search Stages', style: TextStyle(fontSize: 16)),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        if (searchedStages.isNotEmpty) ...[
+                          const Text(
+                            "SEARCHED VEHICLE STAGES",
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          ListView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: searchedStages.length,
+                            itemBuilder: (context, index) {
+                              final stage = searchedStages[index];
+                              return Card(
+                                color: Colors.grey.shade700,
+                                elevation: 2,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                child: ListTile(
+                                  leading: const Icon(Icons.timeline, color: Colors.amber),
+                                  title: Text(stage['stageName'], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                  subtitle: Text('Time: ${convertToIST(stage['timestamp'])}', style: const TextStyle(color: Colors.grey)),
+                                ),
+                              );
+                            },
+                          ),
+                        ]
+                      ],
                     ),
+                  ),
+                ),
             ],
           ),
         ),
