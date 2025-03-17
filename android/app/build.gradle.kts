@@ -6,16 +6,16 @@ plugins {
 
 android {
     namespace = "com.example.car_tracking_new"
-    compileSdk = 35  // ✅ Update to match plugin requirement
+    compileSdk = 35  
 
     defaultConfig {
         applicationId = "com.example.car_tracking"
         minSdk = 21
-        targetSdk = 35  // ✅ Update to match compileSdk
+        targetSdk = 35  
         versionCode = 1
         versionName = "1.0"
 
-        ndkVersion = "27.0.12077973"  // ✅ Update NDK version
+        ndkVersion = "27.0.12077973"  
     }
 
     compileOptions {

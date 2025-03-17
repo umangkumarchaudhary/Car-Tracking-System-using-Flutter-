@@ -24,17 +24,17 @@ router.post("/vehicle-check", async (req, res) => {
       vehicle = new Vehicle({
         vehicleNumber: formattedVehicleNumber,
         entryTime: new Date(),
-        exitTime: null,
+        exitTime: null, // Exit time starts as null
         stages: [
           {
             stageName,
             role,
             eventType,
             timestamp: new Date(),
-            inKM: role === "Security Guard" && eventType === "Entry" ? inKM : null,
-            outKM: role === "Security Guard" && eventType === "Exit" ? outKM : null,
-            inDriver: role === "Security Guard" && eventType === "Entry" ? inDriver : null,
-            outDriver: role === "Security Guard" && eventType === "Exit" ? outDriver : null,
+            inKM: role === "Security Guard" && eventType === "Start" ? inKM : null,
+            outKM: role === "Security Guard" && eventType === "End" ? outKM : null,
+            inDriver: role === "Security Guard" && eventType === "Start" ? inDriver : null,
+            outDriver: role === "Security Guard" && eventType === "End" ? outDriver : null,
             workType: role === "Bay Technician" && eventType === "Start" ? workType || null : null,
             bayNumber: role === "Bay Technician" && eventType === "Start" ? bayNumber || null : null,
           },
@@ -49,7 +49,7 @@ router.post("/vehicle-check", async (req, res) => {
     const relatedStages = vehicle.stages.filter(stage => stage.stageName === stageName);
     const lastStage = relatedStages.length > 0 ? relatedStages[relatedStages.length - 1] : null;
 
-    // 🚨 Ensure request is fully stopped if invalid 🚨
+    // ✅ Case 2: Update Existing Vehicle Entry
     if (eventType === "Start") {
       if (lastStage && lastStage.eventType === "End") {
         console.log(`❌ Cannot restart ${stageName} for ${formattedVehicleNumber}, it has already been completed.`);
@@ -61,12 +61,14 @@ router.post("/vehicle-check", async (req, res) => {
         return res.status(400).json({ success: false, message: `${stageName} has already started. Complete it before starting again.` });
       }
 
-      // ✅ If valid, add "Start" event
+      // ✅ Store `inKM` and `inDriver` correctly inside the existing vehicle's `stages` array
       vehicle.stages.push({
         stageName,
         role,
         eventType: "Start",
         timestamp: new Date(),
+        inKM: role === "Security Guard" ? inKM : null,
+        inDriver: role === "Security Guard" ? inDriver : null,
         workType: role === "Bay Technician" ? workType || null : null,
         bayNumber: role === "Bay Technician" ? bayNumber || null : null,
       });
@@ -88,19 +90,25 @@ router.post("/vehicle-check", async (req, res) => {
         return res.status(400).json({ success: false, message: `Wait at least 10 seconds before completing ${stageName}.` });
       }
 
-      // ✅ If valid, add "End" event
+      // ✅ Store `outKM` and `outDriver` when Security Guard exits the vehicle
       vehicle.stages.push({
         stageName,
         role,
         eventType: "End",
         timestamp: new Date(),
+        outKM: role === "Security Guard" ? outKM : null,
+        outDriver: role === "Security Guard" ? outDriver : null,
       });
+
+      // ✅ Update exitTime **ONLY** if Security Guard marks "End"
+      if (role === "Security Guard" && stageName === "Security Gate") {
+        vehicle.exitTime = new Date();
+      }
 
       await vehicle.save();
       return res.status(200).json({ success: true, message: `${stageName} completed.`, vehicle });
     }
 
-    // 🚨 Stop invalid eventType request 🚨
     console.log(`❌ Invalid event type received for ${formattedVehicleNumber}`);
     return res.status(400).json({ success: false, message: "Invalid event type." });
 
@@ -109,8 +117,6 @@ router.post("/vehicle-check", async (req, res) => {
     return res.status(500).json({ success: false, message: "Server error", error });
   }
 });
-
-
 
 
 // ✅ 2️⃣ GET: Fetch All Vehicles & Their Full Journey

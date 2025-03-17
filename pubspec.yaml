@@ -37,7 +37,8 @@ dependencies:
   excel: ^2.1.0  # Ensure you use the latest version
   path_provider: ^2.1.2  # Ensure you use the latest version
   animate_do: ^3.1.2 
- 
+  permission_handler: ^11.0.1  # Manage permissions
+  file_saver: ^0.2.9
 
 
   # The following adds the Cupertino Icons font to your application.
