@@ -20,7 +20,8 @@ router.post("/vehicle-check", async (req, res) => {
     let vehicle = await Vehicle.findOne({ vehicleNumber: formattedVehicleNumber }).sort({ entryTime: -1 });
 
     // ✅ Case 1: New Vehicle Entry
-    if (!vehicle) {
+    if (!vehicle || (vehicle.exitTime && new Date(vehicle.exitTime) <= new Date())) {
+      // If no vehicle exists or the vehicle has exited, create a new entry
       vehicle = new Vehicle({
         vehicleNumber: formattedVehicleNumber,
         entryTime: new Date(),
@@ -51,14 +52,23 @@ router.post("/vehicle-check", async (req, res) => {
 
     // ✅ Case 2: Update Existing Vehicle Entry
     if (eventType === "Start") {
-      if (lastStage && lastStage.eventType === "End") {
+      // Check if this is a bay-related stage
+      const isBayRelatedStage = stageName === "Bay Allocation Started" || stageName.includes("Bay");
+
+      if (!isBayRelatedStage && lastStage && lastStage.eventType === "End") {
         console.log(`❌ Cannot restart ${stageName} for ${formattedVehicleNumber}, it has already been completed.`);
         return res.status(400).json({ success: false, message: `Cannot restart ${stageName}. It has already been completed.` });
       }
 
-      if (lastStage && lastStage.eventType === "Start") {
+      if (!isBayRelatedStage && lastStage && lastStage.eventType === "Start") {
         console.log(`❌ ${stageName} has already started for ${formattedVehicleNumber}`);
         return res.status(400).json({ success: false, message: `${stageName} has already started. Complete it before starting again.` });
+      }
+
+      // For bay-related stages, we allow starting even if there's a previous Start without an End
+      // For non-bay stages, we check if there's an existing Start that needs to be completed first
+      if (isBayRelatedStage && lastStage && lastStage.eventType === "Start") {
+        console.log(`ℹ️ ${stageName} is already in progress for ${formattedVehicleNumber}, but allowing multiple starts for bay work`);
       }
 
       // ✅ Store `inKM` and `inDriver` correctly inside the existing vehicle's `stages` array
@@ -78,16 +88,30 @@ router.post("/vehicle-check", async (req, res) => {
     }
 
     if (eventType === "End") {
-      if (!lastStage || lastStage.eventType !== "Start") {
+      // For bay-related stages, we're more permissive about the End event
+      const isBayRelatedStage = stageName === "Bay Allocation Started" || stageName.includes("Bay");
+
+      if (!isBayRelatedStage && (!lastStage || lastStage.eventType !== "Start")) {
         console.log(`❌ ${stageName} was not started for ${formattedVehicleNumber}, cannot end.`);
         return res.status(400).json({ success: false, message: `${stageName} was not started.` });
       }
 
-      // ✅ Prevent multiple "End" events within 10 seconds
-      const timeDifference = (new Date() - new Date(lastStage.timestamp)) / 1000; // Convert to seconds
-      if (timeDifference < 10) {
-        console.log(`❌ Wait at least 10 seconds before completing ${stageName} for ${formattedVehicleNumber}.`);
-        return res.status(400).json({ success: false, message: `Wait at least 10 seconds before completing ${stageName}.` });
+      // For bay-related stages, we just need to make sure there's at least one Start event somewhere
+      if (isBayRelatedStage) {
+        const hasAnyStart = relatedStages.some(stage => stage.eventType === "Start");
+        if (!hasAnyStart) {
+          console.log(`❌ ${stageName} was never started for ${formattedVehicleNumber}, cannot end.`);
+          return res.status(400).json({ success: false, message: `${stageName} was never started.` });
+        }
+      }
+
+      // ✅ Prevent multiple "End" events within 10 seconds (keep this for all stages)
+      if (lastStage) {
+        const timeDifference = (new Date() - new Date(lastStage.timestamp)) / 1000; // Convert to seconds
+        if (timeDifference < 10) {
+          console.log(`❌ Wait at least 10 seconds before completing ${stageName} for ${formattedVehicleNumber}.`);
+          return res.status(400).json({ success: false, message: `Wait at least 10 seconds before completing ${stageName}.` });
+        }
       }
 
       // ✅ Store `outKM` and `outDriver` when Security Guard exits the vehicle
@@ -117,6 +141,7 @@ router.post("/vehicle-check", async (req, res) => {
     return res.status(500).json({ success: false, message: "Server error", error });
   }
 });
+
 
 
 // ✅ 2️⃣ GET: Fetch All Vehicles & Their Full Journey

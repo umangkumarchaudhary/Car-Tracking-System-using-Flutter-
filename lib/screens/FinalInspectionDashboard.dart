@@ -26,34 +26,29 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
   final TextEditingController _vehicleNumberController = TextEditingController();
 
   String? vehicleId;
-  //bool isReceptionActive = false;  // REMOVE THIS LINE
   bool isCameraOpen = false;
-  bool isScanning = false; // Prevent multiple QR scans
-
-  // NEW STATE VARIABLE
+  bool isScanning = false;
   bool hasStartedFinalInspection = false;
 
-
+  // Convert UTC to IST
   String convertToIST(String utcTimestamp) {
     final dateFormat = DateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
     final utcTime = dateFormat.parseUTC(utcTimestamp);
-    final istTime = utcTime.add(Duration(hours: 5, minutes: 30)); // IST is UTC+5:30
-    return DateFormat('dd-MM-yyyy hh:mm a').format(istTime); // Format as per your requirement
+    final istTime = utcTime.add(const Duration(hours: 5, minutes: 30));
+    return DateFormat('dd-MM-yyyy hh:mm a').format(istTime);
   }
 
   // Handle QR Code Scanning
   void handleQRCode(String code) async {
-    if (isScanning) return; // Prevent multiple scans
-    isScanning = true; // Lock scanning
+    if (isScanning) return;
+    isScanning = true;
 
     print('QR Code Scanned: $code');
     _vehicleNumberController.text = code;
-    // REMOVE THIS LINE  await fetchVehicleDetails(code); // DO NOT AUTOMATICALLY FETCH VEHICLE DETAILS
+    await fetchVehicleDetails(code);
 
-    Future.delayed(Duration(seconds: 2), () => isScanning = false); // Unlock scanning
+    Future.delayed(const Duration(seconds: 2), () => isScanning = false);
   }
-
-  bool requestInProgress = false; // Prevent duplicate requests
 
   Future<void> fetchAllVehicles() async {
     setState(() => isLoading = true);
@@ -157,10 +152,38 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
       if (data['success'] == true && data.containsKey('vehicle')) {
         setState(() {
           vehicleId = data['vehicle']['_id'];
-          //isReceptionActive = true; // Enable "End Reception" button if needed
+          hasStartedFinalInspection = data['vehicle']['stages'].any((stage) => stage['stageName'] == 'Final Inspection' && stage['eventType'] == 'Start');
         });
       } else {
         print('❌ Vehicle not found');
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            backgroundColor: Colors.grey[900],
+            titleTextStyle: const TextStyle(color: Colors.white, fontSize: 20),
+            contentTextStyle: const TextStyle(color: Colors.white70),
+            title: const Text('No Entry Found'),
+            content: const Text('This vehicle has no previous entry. Do you want to register it as a new vehicle?'),
+            actions: [
+              TextButton(
+                style: TextButton.styleFrom(foregroundColor: Colors.white),
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  backgroundColor: Colors.blueGrey,
+                ),
+                onPressed: () async {
+                  Navigator.pop(context); // Dismiss the dialog
+                  await startReception();
+                },
+                child: const Text('Register'),
+              ),
+            ],
+          ),
+        );
       }
     } catch (error) {
       print('❌ Error fetching vehicle details: $error');
@@ -172,7 +195,6 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
       print('Start Reception: No vehicle number entered');
       return;
     }
-
     print('Starting reception for: ${_vehicleNumberController.text}');
     setState(() => isLoading = true);
 
@@ -197,9 +219,8 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
 
       if (data['success'] == true) {
         vehicleId = data['vehicle']['_id'];
-        //isReceptionActive = true; // ✅ Show "End Reception" button
         setState(() {
-          hasStartedFinalInspection = true; // UPDATE STATE
+          hasStartedFinalInspection = true;
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -208,14 +229,11 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
       } else {
         print('❌ Start Reception Error: ${data['message']}');
 
-        // ✅ If backend says "already started", refresh details
         if (data['message']?.contains('already started') == true) {
           print('🔄 Final Inspection already started, refreshing details...');
           await fetchVehicleDetails(_vehicleNumberController.text);
 
-          // ✅ Force update UI after fetching details
           setState(() {
-            //isReceptionActive = true; // Ensure "End Reception" button appears
             hasStartedFinalInspection = true;
           });
         } else {
@@ -262,10 +280,10 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
           SnackBar(content: Text('Final Inspection completed for $vehicleNumber')),
         );
         setState(() {
-          hasStartedFinalInspection = false; // RESET STATE AFTER ENDING
+          hasStartedFinalInspection = false;
         });
 
-        // ✅ Refresh vehicle list after completion
+        // Refresh vehicle list after completion
         fetchAllVehicles();
       } else {
         print('❌ End Final Inspection Error: ${data['message']}');
@@ -306,30 +324,45 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
   Widget build(BuildContext context) {
     final sortedInProgressVehicles = sortVehicles([...inProgressVehicles]);
     final sortedFinishedVehicles = sortVehicles([...finishedVehicles]);
-
     final groupedInProgressVehicles = groupVehiclesByDate(sortedInProgressVehicles);
     final groupedFinishedVehicles = groupVehiclesByDate(sortedFinishedVehicles);
 
     return Scaffold(
+      backgroundColor: Colors.grey[900],
       appBar: AppBar(
-        title: const Text('Final Inspection Dashboard'),
+        backgroundColor: Colors.black87,
+        title: const Text('Final Inspection Dashboard', style: TextStyle(color: Colors.white)),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: fetchAllVehicles,
           ),
           IconButton(
-            icon: const Icon(Icons.logout),
+            icon: const Icon(Icons.logout, color: Colors.white),
             onPressed: widget.onLogout,
           ),
         ],
       ),
-      body: Padding(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Colors.black87, Colors.grey],
+          ),
+        ),
         padding: const EdgeInsets.all(16.0),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                foregroundColor: Colors.white,
+                backgroundColor: isCameraOpen ? Colors.redAccent : Colors.blueGrey,
+                padding: const EdgeInsets.symmetric(vertical: 15),
+                textStyle: const TextStyle(fontSize: 18),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
               onPressed: () {
                 setState(() {
                   isCameraOpen = !isCameraOpen;
@@ -339,9 +372,11 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
             ),
             const SizedBox(height: 10),
             isCameraOpen
-                ? SizedBox(
+                ? Container(
                     height: 200,
+                    decoration: BoxDecoration(border: Border.all(color: Colors.white24)),
                     child: MobileScanner(
+                      fit: BoxFit.contain,
                       onDetect: (capture) {
                         final List<Barcode> barcodes = capture.barcodes;
                         if (barcodes.isNotEmpty && barcodes.first.rawValue != null) {
@@ -354,131 +389,100 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
             const SizedBox(height: 20),
             TextField(
               controller: _vehicleNumberController,
-              decoration: const InputDecoration(
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
                 labelText: 'Vehicle Number',
-                border: OutlineInputBorder(),
+                labelStyle: const TextStyle(color: Colors.white70),
+                enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                focusedBorder: const OutlineInputBorder(
+  borderSide: BorderSide(color: Colors.blueAccent),
+),
+
               ),
               readOnly: true,
             ),
             const SizedBox(height: 20),
 
-
-            // CONDITIONAL BUTTON RENDERING
-            hasStartedFinalInspection
+            // Conditionally render "Start" or "End" button
+            (vehicleId != null && hasStartedFinalInspection)
                 ? ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: Colors.red[700],
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      textStyle: const TextStyle(fontSize: 18),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
                     onPressed: isLoading ? null : () => endReceptionForVehicle(_vehicleNumberController.text),
                     child: isLoading
-                        ? const CircularProgressIndicator(color: Colors.white)
+                        ? const SizedBox(
+                            height: 24,
+                            width: 24,
+                            child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white)))
                         : const Text('End Final Inspection'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
                   )
                 : ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: Colors.green[700],
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      textStyle: const TextStyle(fontSize: 18),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
                     onPressed: isLoading ? null : startReception,
                     child: isLoading
-                        ? const CircularProgressIndicator(color: Colors.white)
+                        ? const SizedBox(
+                            height: 24,
+                            width: 24,
+                            child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white)))
                         : const Text('Start Final Inspection'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
                   ),
             const SizedBox(height: 30),
             Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                ElevatedButton(
-                  onPressed: () {
-                    setState(() {
-                      showInProgress = true;
-                    });
-                  },
-                  child: const Text('In-Progress Vehicles'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: showInProgress ? Colors.blue : Colors.grey,
+                TextButton(
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    backgroundColor: showInProgress ? Colors.blueGrey : Colors.transparent,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    textStyle: const TextStyle(fontSize: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
+                  onPressed: () => setState(() => showInProgress = true),
+                  child: const Text('In-Progress', style: TextStyle(color: Colors.white)),
                 ),
-                const SizedBox(width: 10),
-                ElevatedButton(
-                  onPressed: () {
-                    setState(() {
-                      showInProgress = false;
-                    });
-                  },
-                  child: const Text('Finished Vehicles'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: !showInProgress ? Colors.blue : Colors.grey,
+                TextButton(
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    backgroundColor: !showInProgress ? Colors.blueGrey : Colors.transparent,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    textStyle: const TextStyle(fontSize: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
+                  onPressed: () => setState(() => showInProgress = false),
+                  child: const Text('Finished', style: TextStyle(color: Colors.white)),
                 ),
               ],
             ),
             const SizedBox(height: 20),
             Expanded(
-              child: showInProgress
-                  ? ListView(
-                      children: groupedInProgressVehicles.keys.map((date) {
-                        final vehicles = groupedInProgressVehicles[date]!;
-                        return Column(
-                          children: [
-                            ListTile(
-                              title: Text(date),
-                              trailing: IconButton(
-                                icon: Icon(expanded[date] ?? false ? Icons.expand_less : Icons.expand_more),
-                                onPressed: () {
-                                  setState(() {
-                                    expanded[date] = !(expanded[date] ?? false);
-                                  });
-                                },
-                              ),
-                            ),
-                            if (expanded[date] ?? false)
-                              Column(
-                                children: vehicles.map((vehicle) {
-                                  return ListTile(
-                                    title: Text('Vehicle No: ${vehicle['vehicleNumber']}'),
-                                    subtitle: Text('Start Time: ${vehicle['startTime']}'),
-                                    trailing: ElevatedButton(
-                                      onPressed: () => endReceptionForVehicle(vehicle['vehicleNumber']),
-                                      child: const Text('End Final Inspection'),
-                                    ),
-                                  );
-                                }).toList(),
-                              ),
-                          ],
-                        );
-                      }).toList(),
-                    )
-                  : ListView(
-                      children: groupedFinishedVehicles.keys.map((date) {
-                        final vehicles = groupedFinishedVehicles[date]!;
-                        return Column(
-                          children: [
-                            ListTile(
-                              title: Text(date),
-                              trailing: IconButton(
-                                icon: Icon(expanded[date] ?? false ? Icons.expand_less : Icons.expand_more),
-                                onPressed: () {
-                                  setState(() {
-                                    expanded[date] = !(expanded[date] ?? false);
-                                  });
-                                },
-                              ),
-                            ),
-                            if (expanded[date] ?? false)
-                              Column(
-                                children: vehicles.map((vehicle) {
-                                  return ListTile(
-                                    title: Text('Vehicle No: ${vehicle['vehicleNumber']}'),
-                                    subtitle: Text(
-                                        'Start Time: ${vehicle['startTime']}\nEnd Time: ${vehicle['endTime'] ?? "N/A"}'),
-                                  );
-                                }).toList(),
-                              ),
-                          ],
-                        );
-                      }).toList(),
+              child: ListView(
+                children: (showInProgress ? inProgressVehicles : finishedVehicles).map((vehicle) {
+                  return Card(
+                    color: Colors.grey[800],
+                    margin: const EdgeInsets.symmetric(vertical: 5),
+                    child: ListTile(
+                      leading: Icon(showInProgress ? Icons.directions_car : Icons.check_circle_outline,
+                          color: Colors.white70),
+                      title: Text(vehicle['vehicleNumber'], style: const TextStyle(color: Colors.white)),
+                      subtitle: Text(
+                          'Start: ${vehicle['startTime'] ?? 'N/A'} ${showInProgress ? '' : '\nEnd: ${vehicle['endTime'] ?? 'N/A'}'}',
+                          style: TextStyle(color: Colors.grey[400])),
                     ),
+                  );
+                }).toList(),
+              ),
             ),
           ],
         ),

@@ -25,13 +25,14 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
   String? vehicleNumber;
   String? searchedVehicleNumber;
   List<Map<String, dynamic>> scannedStages = [];
-  List<Map<String, dynamic>> searchedStages = [];
+  // List<Map<String, dynamic>> searchedStages = []; // No longer store all, use latest only
   List<Map<String, dynamic>> additionalWorkStages = [];
   List<Map<String, dynamic>> stages = [];
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _scannedVehicleController = TextEditingController();
   late AnimationController _animationController;
   bool showSearchStages = false;
+  Map<String, dynamic> latestSearchedStages = {}; // Store latest timestamp for each stage
 
   @override
   void initState() {
@@ -101,12 +102,13 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
         if (data['success'] == true && data.containsKey('vehicle')) {
           setState(() {
             searchedVehicleNumber = vehicleNumber;
-            searchedStages = List<Map<String, dynamic>>.from(data['vehicle']['stages']);
+            List<Map<String, dynamic>> allStages = List<Map<String, dynamic>>.from(data['vehicle']['stages']);
+            latestSearchedStages = findLatestStages(allStages);
           });
         } else {
           setState(() {
             searchedVehicleNumber = vehicleNumber;
-            searchedStages = [];
+            latestSearchedStages = {};
           });
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Vehicle not found.')),
@@ -127,6 +129,18 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
     } finally {
       setState(() => isLoading = false);
     }
+  }
+
+  // Function to find the latest stage for each stageName
+  Map<String, dynamic> findLatestStages(List<Map<String, dynamic>> stages) {
+    Map<String, dynamic> latestStages = {};
+    for (var stage in stages) {
+      String stageName = stage['stageName'];
+      if (!latestStages.containsKey(stageName) || stage['timestamp'].compareTo(latestStages[stageName]['timestamp']) > 0) {
+        latestStages[stageName] = stage;
+      }
+    }
+    return latestStages;
   }
 
   Future<void> startJobCard() async {
@@ -224,7 +238,7 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                 // Removed refresh button
+                // Removed refresh button
                 IconButton(
                   icon: const Icon(Icons.logout, color: Colors.white),
                   onPressed: widget.onLogout,
@@ -381,7 +395,102 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
                   ),
                 ),
               ),
-
+              const SizedBox(height: 20),
+              /// Search Section
+              Card(
+                elevation: 8,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                color: Colors.grey.shade800,
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        "SEARCH VEHICLE",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                        ),
+                      ),
+                      const Divider(color: Colors.white54),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _searchController,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: "Enter vehicle number",
+                          hintStyle: TextStyle(color: Colors.grey.shade600),
+                          prefixIcon: const Icon(Icons.search, color: Colors.white70),
+                          filled: true,
+                          fillColor: Colors.grey.shade900,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(color: Colors.blue.shade700),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 15),
+                      Center(
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.purple.shade700,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          ),
+                          onPressed: () {
+                            fetchVehicleDetails(_searchController.text);
+                            setState(() {
+                              showSearchStages = true;
+                            });
+                          },
+                          icon: const Icon(Icons.search, color: Colors.white, size: 28),
+                          label: const Text(
+                            'SEARCH VEHICLE',
+                            style: TextStyle(color: Colors.white, fontSize: 16),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      if (latestSearchedStages.isNotEmpty && showSearchStages) ...[
+                        const Text(
+                          "SEARCHED VEHICLE STAGES",
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: latestSearchedStages.length,
+                          itemBuilder: (context, index) {
+                            final stageName = latestSearchedStages.keys.elementAt(index);
+                            final stage = latestSearchedStages[stageName];
+                            return Card(
+                              color: Colors.grey.shade700,
+                              elevation: 2,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              child: ListTile(
+                                leading: const Icon(Icons.timeline, color: Colors.white70),
+                                title: Text(stageName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                subtitle: Text('Time: ${convertToIST(stage['timestamp'])}', style: const TextStyle(color: Colors.grey)),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
               const SizedBox(height: 20),
 
               /// Action Buttons
@@ -393,140 +502,29 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green.shade700,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                       ),
-                      onPressed: isLoading ? null : startJobCard,
-                      icon: const Icon(Icons.assignment, color: Colors.white),
-                      label: const Text('Start Job Card', style: TextStyle(color: Colors.white)),
+                      onPressed: startJobCard,
+                      icon: const Icon(Icons.assignment_add, color: Colors.white, size: 28),
+                      label: const Text(
+                        'Start Job Card',
+                        style: TextStyle(color: Colors.white, fontSize: 16),
+                      ),
                     ),
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue.shade700,
+                        backgroundColor: Colors.orange.shade700,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                       ),
-                      onPressed: isLoading ? null : startAdditionalWork,
-                      icon: const Icon(Icons.add, color: Colors.white),
-                      label: const Text('Additional Work', style: TextStyle(color: Colors.white)),
+                      onPressed: startAdditionalWork,
+                      icon: const Icon(Icons.add_box, color: Colors.white, size: 28),
+                      label: const Text(
+                        'Additional Work',
+                        style: TextStyle(color: Colors.white, fontSize: 16),
+                      ),
                     ),
                   ],
-                ),
-
-              const SizedBox(height: 20),
-
-              ElevatedButton(
-                onPressed: () {
-                  setState(() {
-                    showSearchStages = !showSearchStages;
-                    if (!showSearchStages) {
-                      // Clear search results when closing the search section
-                      searchedVehicleNumber = null;
-                      searchedStages = [];
-                      _searchController.clear();
-                    }
-                  });
-                },
-                child: Text(showSearchStages ? 'Close Search' : 'Search Vehicle'),
-              ),
-
-              /// Vehicle Search Section
-              if (showSearchStages)
-                Card(
-                  elevation: 8,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  color: Colors.grey.shade700,
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          "SEARCH VEHICLE",
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                          ),
-                        ),
-                        const Divider(color: Colors.white54),
-                        const SizedBox(height: 10),
-                        TextField(
-                          controller: _searchController,
-                          style: const TextStyle(color: Colors.white),
-                          decoration: InputDecoration(
-                            labelText: 'Enter Vehicle Number',
-                            labelStyle: const TextStyle(color: Colors.white70),
-                            hintText: 'e.g., KA01AB1234',
-                            hintStyle: TextStyle(color: Colors.grey.shade400),
-                            filled: true,
-                            fillColor: Colors.grey.shade800,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide.none,
-                            ),
-                            prefixIcon: const Icon(Icons.search, color: Colors.amber),
-                            suffixIcon: IconButton(
-                              icon: const Icon(Icons.clear, color: Colors.white70),
-                              onPressed: () => _searchController.clear(),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(color: Colors.amber.shade700, width: 2),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Center(
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.amber.shade700,
-                              foregroundColor: Colors.black,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                            ),
-                            onPressed: () {
-                              if (_searchController.text.isNotEmpty) {
-                                fetchVehicleDetails(_searchController.text.trim());
-                              } else {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Please enter a vehicle number')),
-                                );
-                              }
-                            },
-                            child: const Text('Search Stages', style: TextStyle(fontSize: 16)),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        if (searchedStages.isNotEmpty) ...[
-                          const Text(
-                            "SEARCHED VEHICLE STAGES",
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          ListView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: searchedStages.length,
-                            itemBuilder: (context, index) {
-                              final stage = searchedStages[index];
-                              return Card(
-                                color: Colors.grey.shade700,
-                                elevation: 2,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                child: ListTile(
-                                  leading: const Icon(Icons.timeline, color: Colors.amber),
-                                  title: Text(stage['stageName'], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                                  subtitle: Text('Time: ${convertToIST(stage['timestamp'])}', style: const TextStyle(color: Colors.grey)),
-                                ),
-                              );
-                            },
-                          ),
-                        ]
-                      ],
-                    ),
-                  ),
                 ),
             ],
           ),

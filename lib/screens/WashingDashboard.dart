@@ -28,7 +28,6 @@ class _WashingDashboardState extends State<WashingDashboard> {
   String? vehicleId;
   bool isCameraOpen = false;
   bool isScanning = false;
-
   bool hasStartedWashing = false; // Tracks if washing has started
 
   String convertToIST(String utcTimestamp) {
@@ -44,6 +43,7 @@ class _WashingDashboardState extends State<WashingDashboard> {
 
     print('QR Code Scanned: $code');
     _vehicleNumberController.text = code;
+    await fetchVehicleDetails(code); // Fetch details upon scanning
 
     Future.delayed(const Duration(seconds: 2), () => isScanning = false);
   }
@@ -150,9 +150,38 @@ class _WashingDashboardState extends State<WashingDashboard> {
       if (data['success'] == true && data.containsKey('vehicle')) {
         setState(() {
           vehicleId = data['vehicle']['_id'];
+          hasStartedWashing = data['vehicle']['stages'].any((stage) => stage['stageName'] == 'Washing' && stage['eventType'] == 'Start');
         });
       } else {
         print('❌ Vehicle not found');
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            backgroundColor: Colors.grey[900],
+            titleTextStyle: const TextStyle(color: Colors.white, fontSize: 20),
+            contentTextStyle: const TextStyle(color: Colors.white70),
+            title: const Text('No Entry Found'),
+            content: const Text('This vehicle has no previous entry. Do you want to register it as a new vehicle?'),
+            actions: [
+              TextButton(
+                style: TextButton.styleFrom(foregroundColor: Colors.white),
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  backgroundColor: Colors.blueGrey,
+                ),
+                onPressed: () async {
+                  Navigator.pop(context); // Dismiss the dialog
+                  await startWashing();
+                },
+                child: const Text('Register'),
+              ),
+            ],
+          ),
+        );
       }
     } catch (error) {
       print('❌ Error fetching vehicle details: $error');
@@ -295,25 +324,41 @@ class _WashingDashboardState extends State<WashingDashboard> {
     final groupedFinishedVehicles = groupVehiclesByDate(sortedFinishedVehicles);
 
     return Scaffold(
+      backgroundColor: Colors.grey[900],
       appBar: AppBar(
-        title: const Text('Washing Dashboard'),
+        backgroundColor: Colors.black87,
+        title: const Text('Washing Dashboard', style: TextStyle(color: Colors.white)),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: fetchAllVehicles,
           ),
           IconButton(
-            icon: const Icon(Icons.logout),
+            icon: const Icon(Icons.logout, color: Colors.white),
             onPressed: widget.onLogout,
           ),
         ],
       ),
-      body: Padding(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Colors.black87, Colors.grey],
+          ),
+        ),
         padding: const EdgeInsets.all(16.0),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                foregroundColor: Colors.white,
+                backgroundColor: isCameraOpen ? Colors.redAccent : Colors.blueGrey,
+                padding: const EdgeInsets.symmetric(vertical: 15),
+                textStyle: const TextStyle(fontSize: 18),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
               onPressed: () {
                 setState(() {
                   isCameraOpen = !isCameraOpen;
@@ -323,9 +368,11 @@ class _WashingDashboardState extends State<WashingDashboard> {
             ),
             const SizedBox(height: 10),
             isCameraOpen
-                ? SizedBox(
+                ? Container(
                     height: 200,
+                    decoration: BoxDecoration(border: Border.all(color: Colors.white24)),
                     child: MobileScanner(
+                      fit: BoxFit.contain,
                       onDetect: (capture) {
                         final List<Barcode> barcodes = capture.barcodes;
                         if (barcodes.isNotEmpty && barcodes.first.rawValue != null) {
@@ -338,59 +385,79 @@ class _WashingDashboardState extends State<WashingDashboard> {
             const SizedBox(height: 20),
             TextField(
               controller: _vehicleNumberController,
-              decoration: const InputDecoration(
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
                 labelText: 'Vehicle Number',
-                border: OutlineInputBorder(),
+                labelStyle: const TextStyle(color: Colors.white70),
+                enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                focusedBorder: const OutlineInputBorder(
+  borderSide: BorderSide(color: Colors.blueAccent),
+),
+
               ),
               readOnly: true,
             ),
             const SizedBox(height: 20),
-            hasStartedWashing
+
+            // Conditionally render "Start" or "End" button
+            (vehicleId != null && hasStartedWashing)
                 ? ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: Colors.red[700],
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      textStyle: const TextStyle(fontSize: 18),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
                     onPressed: isLoading ? null : () => endWashingForVehicle(_vehicleNumberController.text),
                     child: isLoading
-                        ? const CircularProgressIndicator(color: Colors.white)
+                        ? const SizedBox(
+                            height: 24,
+                            width: 24,
+                            child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white)))
                         : const Text('End Washing'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
                   )
                 : ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: Colors.green[700],
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      textStyle: const TextStyle(fontSize: 18),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
                     onPressed: isLoading ? null : startWashing,
                     child: isLoading
-                        ? const CircularProgressIndicator(color: Colors.white)
+                        ? const SizedBox(
+                            height: 24,
+                            width: 24,
+                            child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white)))
                         : const Text('Start Washing'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
                   ),
             const SizedBox(height: 30),
             Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                ElevatedButton(
-                  onPressed: () {
-                    setState(() {
-                      showInProgress = true;
-                    });
-                  },
-                  child: const Text('In-Progress Vehicles'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: showInProgress ? Colors.blue : Colors.grey,
+                TextButton(
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    backgroundColor: showInProgress ? Colors.blueGrey : Colors.transparent,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    textStyle: const TextStyle(fontSize: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
+                  onPressed: () => setState(() => showInProgress = true),
+                  child: const Text('In-Progress', style: TextStyle(color: Colors.white)),
                 ),
-                const SizedBox(width: 10),
-                ElevatedButton(
-                  onPressed: () {
-                    setState(() {
-                      showInProgress = false;
-                    });
-                  },
-                  child: const Text('Finished Vehicles'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: !showInProgress ? Colors.blue : Colors.grey,
+                TextButton(
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    backgroundColor: !showInProgress ? Colors.blueGrey : Colors.transparent,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    textStyle: const TextStyle(fontSize: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
+                  onPressed: () => setState(() => showInProgress = false),
+                  child: const Text('Finished', style: TextStyle(color: Colors.white)),
                 ),
               ],
             ),
@@ -403,9 +470,9 @@ class _WashingDashboardState extends State<WashingDashboard> {
                         return Column(
                           children: [
                             ListTile(
-                              title: Text(date),
+                              title: Text(date, style: const TextStyle(color: Colors.white)),
                               trailing: IconButton(
-                                icon: Icon(expanded[date] ?? false ? Icons.expand_less : Icons.expand_more),
+                                icon: Icon(expanded[date] ?? false ? Icons.expand_less : Icons.expand_more, color: Colors.white70),
                                 onPressed: () {
                                   setState(() {
                                     expanded[date] = !(expanded[date] ?? false);
@@ -416,12 +483,14 @@ class _WashingDashboardState extends State<WashingDashboard> {
                             if (expanded[date] ?? false)
                               Column(
                                 children: vehicles.map((vehicle) {
-                                  return ListTile(
-                                    title: Text('Vehicle No: ${vehicle['vehicleNumber']}'),
-                                    subtitle: Text('Start Time: ${vehicle['startTime']}'),
-                                    trailing: ElevatedButton(
-                                      onPressed: () => endWashingForVehicle(vehicle['vehicleNumber']),
-                                      child: const Text('End Washing'),
+                                  return Card(
+                                    color: Colors.grey[800],
+                                    margin: const EdgeInsets.symmetric(vertical: 5),
+                                    child: ListTile(
+                                      leading: const Icon(Icons.directions_car, color: Colors.white70),
+                                      title: Text('Vehicle No: ${vehicle['vehicleNumber']}', style: const TextStyle(color: Colors.white)),
+                                      subtitle: Text('Start Time: ${vehicle['startTime']}', style: TextStyle(color: Colors.grey[400])),
+                                      // REMOVED THE END BUTTON HERE
                                     ),
                                   );
                                 }).toList(),
@@ -436,9 +505,9 @@ class _WashingDashboardState extends State<WashingDashboard> {
                         return Column(
                           children: [
                             ListTile(
-                              title: Text(date),
+                              title: Text(date, style: const TextStyle(color: Colors.white)),
                               trailing: IconButton(
-                                icon: Icon(expanded[date] ?? false ? Icons.expand_less : Icons.expand_more),
+                                icon: Icon(expanded[date] ?? false ? Icons.expand_less : Icons.expand_more, color: Colors.white70),
                                 onPressed: () {
                                   setState(() {
                                     expanded[date] = !(expanded[date] ?? false);
@@ -449,10 +518,16 @@ class _WashingDashboardState extends State<WashingDashboard> {
                             if (expanded[date] ?? false)
                               Column(
                                 children: vehicles.map((vehicle) {
-                                  return ListTile(
-                                    title: Text('Vehicle No: ${vehicle['vehicleNumber']}'),
-                                    subtitle: Text(
-                                        'Start Time: ${vehicle['startTime']}\nEnd Time: ${vehicle['endTime'] ?? "N/A"}'),
+                                  return Card(
+                                    color: Colors.grey[800],
+                                    margin: const EdgeInsets.symmetric(vertical: 5),
+                                    child: ListTile(
+                                      leading: const Icon(Icons.check_circle_outline, color: Colors.white70),
+                                      title: Text('Vehicle No: ${vehicle['vehicleNumber']}', style: const TextStyle(color: Colors.white)),
+                                      subtitle: Text(
+                                          'Start Time: ${vehicle['startTime']}\nEnd Time: ${vehicle['endTime']}',
+                                          style: TextStyle(color: Colors.grey[400])),
+                                    ),
                                   );
                                 }).toList(),
                               ),
