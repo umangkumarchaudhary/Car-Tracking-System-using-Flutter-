@@ -23,7 +23,7 @@ const allowedRoles = [
   "Bay Technician",
   "Final Inspection Technician",
   "Diagnosis Engineer",
-  "Washing Boy",
+  "Washing",
 ];
 
 // MongoDB User Schema

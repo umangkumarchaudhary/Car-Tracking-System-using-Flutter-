@@ -203,7 +203,7 @@ class _LoginScreenState extends State<LoginScreen> {
             );
             break;
 
-          case "Washing Boy":
+          case "Washing":
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(
@@ -338,7 +338,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 "Bay Technician",
                 "Final Inspection Technician",
                 "Diagnosis Engineer",
-                "Washing Boy",
+                "Washing",
               ].map((role) {
                 return DropdownMenuItem(
                   value: role,
@@ -547,7 +547,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 "Bay Technician",
                 "Final Inspection Technician",
                 "Diagnosis Engineer",
-                "Washing Boy",
+                "Washing",
               ].map((role) {
                 return DropdownMenuItem(
                   value: role,
