@@ -162,7 +162,7 @@ class _JobControllerDashboardState extends State<JobControllerDashboard>
   setState(() => isLoading = true);
   
   // Using the "/vehicles/bay-allocation-in-progress" endpoint from your vehicleRoute.js
-  final url = Uri.parse('$baseUrl/vehicles/bay-allocation-in-progress');
+  final url = Uri.parse('$baseUrl/vehicle-check');
 
   try {
     final response = await http.get(

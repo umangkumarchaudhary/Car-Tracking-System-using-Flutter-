@@ -47,6 +47,12 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
     print('QR Code Scanned: $code');
     _vehicleNumberController.text = code;
 
+    await fetchVehicleDetails(code);
+
+    setState(() {
+      isCameraOpen = false; // Close camera after scanning
+    });
+
     Future.delayed(const Duration(seconds: 2), () => isScanning = false);
   }
 
@@ -83,8 +89,9 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
           print('🚗 Checking vehicle: $vehicleNumber');
           print('📜 Stages: $stages');
 
+          // Adjusted to use the new "Bay Work: [WorkType]" stage names
           final List<dynamic> maintenanceStages = stages
-              .where((stage) => stage['stageName'] == 'Maintainance')
+              .where((stage) => stage['stageName'].startsWith('Bay Work:'))
               .toList();
 
           print('🔍 Maintenance Stages for $vehicleNumber: $maintenanceStages');
@@ -100,20 +107,30 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
             print('📍 Last Event Type: $lastEventType');
 
             if (lastEventType == 'Start') {
+              // Extract work type from stage name
+              String stageName = maintenanceStages.first['stageName'];
+              String workType = stageName.replaceFirst('Bay Work: ', '');
+
               inProgress.add({
                 'vehicleNumber': vehicleNumber,
                 'startTime': startTime,
                 'endTime': null,
+                'workType': workType, // Include work type
               });
             } else if (lastEventType == 'End') {
+              // Extract work type from stage name
+              String stageName = maintenanceStages.first['stageName'];
+              String workType = stageName.replaceFirst('Bay Work: ', '');
+
               finished.add({
                 'vehicleNumber': vehicleNumber,
                 'startTime': startTime,
                 'endTime': endTime,
+                'workType': workType, // Include work type
               });
             }
           } else {
-            print('❌ No Maintenance stage found for $vehicleNumber');
+            print('❌ No Bay Work stage found for $vehicleNumber');
           }
         }
 
@@ -150,14 +167,53 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
       print('Vehicle Details: $data');
 
       if (data['success'] == true && data.containsKey('vehicle')) {
+        final vehicleData = data['vehicle'];
+        final stages = vehicleData['stages'];
+
         setState(() {
-          vehicleId = data['vehicle']['_id'];
+          vehicleId = vehicleData['_id'];
+
+          // Check if there's a previous 'Start' event
+          bool foundStartEvent = false;
+          String? prevWorkType;
+          String? prevBayNumber;
+
+          if (stages != null && stages.isNotEmpty) {
+            for (var i = stages.length - 1; i >= 0; i--) {
+              if (stages[i]['eventType'] == 'Start' && stages[i]['stageName'] == 'Bay Allocation Started') {
+                foundStartEvent = true;
+                prevWorkType = stages[i]['workType'];
+                prevBayNumber = stages[i]['bayNumber'];
+                break;
+              }
+            }
+          }
+
+          if (foundStartEvent) {
+            hasStartedWork = true;
+            selectedWorkType = prevWorkType;
+            selectedBayNumber = prevBayNumber;
+          } else {
+            hasStartedWork = false;
+            selectedWorkType = null;
+            selectedBayNumber = null;
+          }
         });
       } else {
         print('❌ Vehicle not found');
+        setState(() {
+          hasStartedWork = false;
+          selectedWorkType = null;
+          selectedBayNumber = null;
+        });
       }
     } catch (error) {
       print('❌ Error fetching vehicle details: $error');
+      setState(() {
+        hasStartedWork = false;
+        selectedWorkType = null;
+        selectedBayNumber = null;
+      });
     }
   }
 
@@ -188,10 +244,10 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
         body: json.encode({
           'vehicleNumber': _vehicleNumberController.text,
           'role': 'Bay Technician',
-          'stageName': 'Maintainance',
+          'stageName': 'Bay Work: $selectedWorkType', // ✅ CORRECT
           'eventType': 'Start',
-          'workType': selectedWorkType, // USE SELECTED VALUES
-          'bayNumber': selectedBayNumber, // USE SELECTED VALUES
+          'workType': selectedWorkType,
+          'bayNumber': selectedBayNumber,
         }),
       );
 
@@ -213,7 +269,6 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
         if (data['message']?.contains('already started') == true) {
           print('🔄 Work already started, refreshing details...');
           await fetchVehicleDetails(_vehicleNumberController.text);
-
           setState(() {
             hasStartedWork = true;
           });
@@ -233,7 +288,6 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
     }
   }
 
-
   Future<void> endWorkForVehicle(String vehicleNumber) async {
     print('Ending work for: $vehicleNumber');
 
@@ -248,7 +302,7 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
         body: json.encode({
           'vehicleNumber': vehicleNumber,
           'role': 'Bay Technician',
-          'stageName': 'Maintainance',
+          'stageName': 'Bay Work: $selectedWorkType', // Ensure this matches how you start the work
           'eventType': 'End',
         }),
       );
@@ -264,7 +318,7 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
           hasStartedWork = false;
         });
 
-        fetchAllVehicles();
+        await fetchAllVehicles();
       } else {
         print('❌ End Work Error: ${data['message']}');
       }
@@ -303,6 +357,12 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
 
   String? selectedWorkType;
   String? selectedBayNumber;
+
+  @override
+  void initState() {
+    super.initState();
+    fetchAllVehicles();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -401,125 +461,103 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
               },
             ),
             const SizedBox(height: 20),
-            hasStartedWork
-                ? ElevatedButton(
-                    onPressed: isLoading ? null : () => endWorkForVehicle(_vehicleNumberController.text),
-                    child: isLoading
-                        ? const CircularProgressIndicator(color: Colors.white)
-                        : const Text('Finish Work'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                  )
-                : ElevatedButton(
-                    onPressed: isLoading ? null : startWork,
-                    child: isLoading
-                        ? const CircularProgressIndicator(color: Colors.white)
-                        : const Text('Start Work'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                  ),
-            const SizedBox(height: 30),
             Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 ElevatedButton(
+                  onPressed: isLoading ? null : startWork,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  child: isLoading
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : const Text('Start Work'),
+                ),
+                ElevatedButton(
+                  onPressed: () => endWorkForVehicle(_vehicleNumberController.text),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  child: const Text('End Work'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                TextButton(
                   onPressed: () {
                     setState(() {
                       showInProgress = true;
                     });
                   },
-                  child: const Text('Work in Progress'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: showInProgress ? Colors.blue : Colors.grey,
+                  child: Text(
+                    'In-Progress',
+                    style: TextStyle(
+                      color: showInProgress ? Colors.blue : Colors.grey,
+                      fontWeight: showInProgress ? FontWeight.bold : FontWeight.normal,
+                    ),
                   ),
                 ),
-                const SizedBox(width: 10),
-                ElevatedButton(
+                TextButton(
                   onPressed: () {
                     setState(() {
                       showInProgress = false;
                     });
                   },
-                  child: const Text('Completed Jobs'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: !showInProgress ? Colors.blue : Colors.grey,
+                  child: Text(
+                    'Finished',
+                    style: TextStyle(
+                      color: !showInProgress ? Colors.blue : Colors.grey,
+                      fontWeight: !showInProgress ? FontWeight.bold : FontWeight.normal,
+                    ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 20),
             Expanded(
               child: showInProgress
-                  ? ListView(
-                      children: groupedInProgressVehicles.keys.map((date) {
-                        final vehicles = groupedInProgressVehicles[date]!;
-                        return Column(
-                          children: [
-                            ListTile(
-                              title: Text(date),
-                              trailing: IconButton(
-                                icon: Icon(expanded[date] ?? false ? Icons.expand_less : Icons.expand_more),
-                                onPressed: () {
-                                  setState(() {
-                                    expanded[date] = !(expanded[date] ?? false);
-                                  });
-                                },
-                              ),
-                            ),
-                            if (expanded[date] ?? false)
-                              Column(
-                                children: vehicles.map((vehicle) {
-                                  return ListTile(
-                                    title: Text('Vehicle No: ${vehicle['vehicleNumber']}'),
-                                    subtitle: Text('Start Time: ${vehicle['startTime']}'),
-                                    trailing: ElevatedButton(
-                                      onPressed: () => endWorkForVehicle(vehicle['vehicleNumber']),
-                                      child: const Text('Finish Work'),
-                                    ),
-                                  );
-                                }).toList(),
-                              ),
-                          ],
-                        );
-                      }).toList(),
-                    )
-                  : ListView(
-                      children: groupedFinishedVehicles.keys.map((date) {
-                        final vehicles = groupedFinishedVehicles[date]!;
-                        return Column(
-                          children: [
-                            ListTile(
-                              title: Text(date),
-                              trailing: IconButton(
-                                icon: Icon(expanded[date] ?? false ? Icons.expand_less : Icons.expand_more),
-                                onPressed: () {
-                                  setState(() {
-                                    expanded[date] = !(expanded[date] ?? false);
-                                  });
-                                },
-                              ),
-                            ),
-                            if (expanded[date] ?? false)
-                              Column(
-                                children: vehicles.map((vehicle) {
-                                  return ListTile(
-                                    title: Text('Vehicle No: ${vehicle['vehicleNumber']}'),
-                                    subtitle: Text(
-                                        'Start Time: ${vehicle['startTime']}\nEnd Time: ${vehicle['endTime'] ?? "N/A"}'),
-                                  );
-                                }).toList(),
-                              ),
-                          ],
-                        );
-                      }).toList(),
-                    ),
+                  ? buildVehicleList(groupedInProgressVehicles)
+                  : buildVehicleList(groupedFinishedVehicles),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget buildVehicleList(Map<String, List<Map<String, dynamic>>> groupedVehicles) {
+    return ListView.builder(
+      itemCount: groupedVehicles.length,
+      itemBuilder: (context, index) {
+        final date = groupedVehicles.keys.elementAt(index);
+        final vehicles = groupedVehicles[date]!;
+        return ExpansionTile(
+          title: Text(date),
+          initiallyExpanded: expanded[date] ?? false,
+          onExpansionChanged: (bool expanding) {
+            setState(() {
+              expanded[date] = expanding;
+            });
+          },
+          children: vehicles.map((vehicle) {
+            return ListTile(
+              title: Text(vehicle['vehicleNumber']),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Work Type: ${vehicle['workType']}'),
+                  Text('Start Time: ${vehicle['startTime']}'),
+                  if (vehicle['endTime'] != null) Text('End Time: ${vehicle['endTime']}'),
+                ],
+              ),
+            );
+          }).toList(),
+        );
+      },
     );
   }
 }

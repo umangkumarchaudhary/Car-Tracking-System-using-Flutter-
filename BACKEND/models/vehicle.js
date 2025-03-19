@@ -11,7 +11,7 @@ const stageSchema = new mongoose.Schema({
   outDriver: { type: String, default: null },
   workType: { 
     type: String, 
-    enum: ["PM", "GR", "Body and Paint", "Diagnosis"], 
+    enum: ["PM", "GR", "Body and Paint", "Diagnosis", 'PMGR', 'PMGR + Body&Paint', 'GR+ Body & Paint', 'PM+ Body and Paint'], 
     default: null 
   },
   bayNumber: { 
