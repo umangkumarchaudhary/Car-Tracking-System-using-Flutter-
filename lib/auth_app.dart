@@ -106,7 +106,11 @@ class _LoginScreenState extends State<LoginScreen> {
       if (response.statusCode == 200) {
         SharedPreferences prefs = await SharedPreferences.getInstance();
         await prefs.setString("token", data["token"]);
+        
+        // Store user approval status
+        await prefs.setBool("isApproved", data["user"]["isApproved"] ?? false);
 
+        // Navigate based on role
         switch (selectedRole) {
           case "Security Guard":
             Navigator.pushReplacement(
@@ -337,7 +341,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 "Job Controller",
                 "Bay Technician",
                 "Final Inspection Technician",
-                "Diagnosis Engineer",
                 "Washing",
               ].map((role) {
                 return DropdownMenuItem(
@@ -359,7 +362,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10)),
                     ),
-                    onPressed: _login, // Call the existing login method here
+                    onPressed: _login,
                     child: Text(
                       "Login",
                       style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
@@ -392,7 +395,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final TextEditingController nameController = TextEditingController();
   final TextEditingController mobileController = TextEditingController();
   final TextEditingController emailController = TextEditingController();
-  final TextEditingController passwordController = TextEditingController();
   String selectedRole = "Security Guard";
   bool isLoading = false;
 
@@ -408,7 +410,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
               "name": nameController.text,
               "mobile": mobileController.text,
               "email": emailController.text,
-              "password": passwordController.text,
               "role": selectedRole,
             }),
           )
@@ -421,7 +422,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 201) {
-        _showSnackBar("Registration successful! Please login.");
+        if (selectedRole == "Admin") {
+          _showSnackBar("Admin registered successfully! You can login immediately.");
+        } else {
+          _showSnackBar("Registration successful! Please wait for admin approval before logging in.");
+        }
         widget.switchMode();
       } else {
         _showSnackBar(data["message"]);
@@ -464,7 +469,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
             ),
             SizedBox(height: 10),
             Text(
-              "Join us today",
+              selectedRole == "Admin" 
+                ? "Create an Admin account"
+                : "Account will require admin approval",
               style: TextStyle(fontSize: 16, color: Colors.grey[400]),
             ),
             SizedBox(height: 40),
@@ -516,37 +523,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
             ),
             SizedBox(height: 20),
-            // Password Input
-            TextField(
-              controller: passwordController,
-              style: TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                labelText: "Password",
-                labelStyle: TextStyle(color: Colors.grey[400]),
-                filled: true,
-                fillColor: Colors.grey[900],
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-              obscureText: true,
-            ),
-            SizedBox(height: 20),
             // Role Dropdown
             DropdownButton<String>(
               dropdownColor: Colors.grey[900],
               value: selectedRole,
               onChanged: (newValue) => setState(() => selectedRole = newValue!),
               items: [
-                "Admin",
                 "Security Guard",
                 "Active Reception Technician",
                 "Service Advisor",
                 "Job Controller",
                 "Bay Technician",
                 "Final Inspection Technician",
-                "Diagnosis Engineer",
                 "Washing",
               ].map((role) {
                 return DropdownMenuItem(
@@ -567,7 +555,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10)),
                     ),
-                    onPressed: _register, // Call the existing register method here
+                    onPressed: _register,
                     child: Text(
                       "Register",
                       style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),

@@ -1,293 +1,311 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:intl/intl.dart';
-import 'package:fl_chart/fl_chart.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class AdminDashboard extends StatefulWidget {
   final String token;
   final VoidCallback onLogout;
 
-  const AdminDashboard({
-    Key? key,
-    required this.token,
-    required this.onLogout,
-  }) : super(key: key);
+  AdminDashboard({required this.token, required this.onLogout});
 
   @override
   _AdminDashboardState createState() => _AdminDashboardState();
 }
 
-class _AdminDashboardState extends State<AdminDashboard> {
-  List<Vehicle> vehicles = [];
-  List<StageData> stageData = [];
-  int totalVehicles = 0;
-  int activeVehiclesInInteractiveBay = 0;
-  int activeVehiclesInMaintenance = 0;
-  int activeVehiclesInWashing = 0;
-  int activeVehiclesInFinalInspection = 0;
-
-  Future<void> fetchVehicles() async {
-    setState(() => vehicles = []);
-    final url = Uri.parse('http://192.168.108.49:5000/api/vehicles');
-    try {
-      final response = await http.get(
-        url,
-        headers: {
-          'Authorization': 'Bearer ${widget.token}',
-          'Content-Type': 'application/json',
-        },
-      );
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        setState(() {
-          vehicles = data['vehicles']
-              .map<Vehicle>((json) => Vehicle.fromJson(json))
-              .toList();
-          totalVehicles = vehicles.length;
-          stageData = calculateStageData(vehicles);
-          activeVehiclesInInteractiveBay = stageData
-              .firstWhere((element) => element.stageName == 'Interactive Bay')
-              .activeVehicles;
-          activeVehiclesInMaintenance = stageData
-              .firstWhere((element) => element.stageName == 'Maintainance')
-              .activeVehicles;
-          activeVehiclesInWashing = stageData
-              .firstWhere((element) => element.stageName == 'Washing')
-              .activeVehicles;
-          activeVehiclesInFinalInspection = stageData
-              .firstWhere((element) => element.stageName == 'Final Inspection')
-              .activeVehicles;
-        });
-      } else {
-        print('Failed to load vehicles');
-      }
-    } catch (error) {
-      print('Error fetching vehicles: $error');
-    }
-  }
-
-  List<StageData> calculateStageData(List<Vehicle> vehicles) {
-    final stageData = [
-      StageData(stageName: 'Interactive Bay', activeVehicles: 0),
-      StageData(stageName: 'Maintainance', activeVehicles: 0),
-      StageData(stageName: 'Washing', activeVehicles: 0),
-      StageData(stageName: 'Final Inspection', activeVehicles: 0),
-    ];
-
-    for (var vehicle in vehicles) {
-      for (var stage in vehicle.stages) {
-        if (stage['stageName'] == 'Interactive Bay' &&
-            stage['eventType'] == 'Start') {
-          stageData
-              .firstWhere((element) => element.stageName == 'Interactive Bay')
-              .activeVehicles++;
-        } else if (stage['stageName'] == 'Maintainance' &&
-            stage['eventType'] == 'Start') {
-          stageData
-              .firstWhere((element) => element.stageName == 'Maintainance')
-              .activeVehicles++;
-        } else if (stage['stageName'] == 'Washing' &&
-            stage['eventType'] == 'Start') {
-          stageData
-              .firstWhere((element) => element.stageName == 'Washing')
-              .activeVehicles++;
-        } else if (stage['stageName'] == 'Final Inspection' &&
-            stage['eventType'] == 'Start') {
-          stageData
-              .firstWhere((element) => element.stageName == 'Final Inspection')
-              .activeVehicles++;
-        }
-      }
-    }
-
-    return stageData;
-  }
+class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  List<dynamic> allUsers = [];
+  List<dynamic> pendingUsers = [];
+  bool isLoading = true;
+  bool isApproving = false;
+  bool isDeleting = false;
+  final String baseUrl = "http://192.168.108.49:5000/api";
 
   @override
   void initState() {
     super.initState();
-    fetchVehicles();
+    _tabController = TabController(length: 2, vsync: this);
+    _loadUsers();
+  }
+
+  Future<void> _loadUsers() async {
+    setState(() {
+      isLoading = true;
+    });
+
+    try {
+      // Fetch all users
+      final allUsersResponse = await http.get(
+        Uri.parse('$baseUrl/users'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${widget.token}',
+        },
+      );
+
+      // Fetch pending users
+      final pendingUsersResponse = await http.get(
+        Uri.parse('$baseUrl/users/pending'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${widget.token}',
+        },
+      );
+
+      if (allUsersResponse.statusCode == 200 && pendingUsersResponse.statusCode == 200) {
+        final allUsersData = json.decode(allUsersResponse.body);
+        final pendingUsersData = json.decode(pendingUsersResponse.body);
+
+        setState(() {
+          allUsers = allUsersData['users'];
+          pendingUsers = pendingUsersData['pendingUsers'];
+          isLoading = false;
+        });
+      } else {
+        _showSnackBar("Failed to load users. Please try again.");
+        setState(() {
+          isLoading = false;
+        });
+      }
+    } catch (e) {
+      _showSnackBar("Error: $e");
+      setState(() {
+        isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _approveUser(String userId) async {
+    setState(() {
+      isApproving = true;
+    });
+
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/users/$userId/approve'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${widget.token}',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        _showSnackBar("User approved successfully!");
+        _loadUsers(); // Refresh user lists
+      } else {
+        final errorData = json.decode(response.body);
+        _showSnackBar(errorData['message'] ?? "Failed to approve user.");
+      }
+    } catch (e) {
+      _showSnackBar("Error: $e");
+    } finally {
+      setState(() {
+        isApproving = false;
+      });
+    }
+  }
+
+  Future<void> _deleteUser(String userId) async {
+    setState(() {
+      isDeleting = true;
+    });
+
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/users/$userId'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${widget.token}',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        _showSnackBar("User deleted successfully!");
+        _loadUsers(); // Refresh user lists
+      } else {
+        final errorData = json.decode(response.body);
+        _showSnackBar(errorData['message'] ?? "Failed to delete user.");
+      }
+    } catch (e) {
+      _showSnackBar("Error: $e");
+    } finally {
+      setState(() {
+        isDeleting = false;
+      });
+    }
+  }
+
+  void _showSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Widget _buildUserList(List<dynamic> users, bool isPendingList) {
+    if (isLoading) {
+      return Center(child: CircularProgressIndicator());
+    }
+
+    if (users.isEmpty) {
+      return Center(
+        child: Text(
+          isPendingList ? "No pending approvals" : "No users found",
+          style: TextStyle(fontSize: 18, color: Colors.grey),
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadUsers,
+      child: ListView.builder(
+        itemCount: users.length,
+        itemBuilder: (context, index) {
+          final user = users[index];
+          final bool isApproved = user['isApproved'] ?? false;
+          
+          return Card(
+            margin: EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+            child: ListTile(
+              leading: CircleAvatar(
+                backgroundColor: Colors.blue,
+                child: Text(
+                  user['name'][0].toUpperCase(),
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+              title: Text(user['name'] ?? "Unknown"),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("Mobile: ${user['mobile'] ?? 'N/A'}"),
+                  Text("Role: ${user['role'] ?? 'N/A'}"),
+                  Text("Status: ${isApproved ? 'Approved' : 'Pending'}"),
+                ],
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (!isApproved)
+                    IconButton(
+                      icon: Icon(Icons.check_circle, color: Colors.green),
+                      onPressed: isApproving 
+                          ? null 
+                          : () => _showApproveConfirmation(user['_id']),
+                    ),
+                  IconButton(
+                    icon: Icon(Icons.delete, color: Colors.red),
+                    onPressed: isDeleting 
+                        ? null 
+                        : () => _showDeleteConfirmation(user['_id']),
+                  ),
+                ],
+              ),
+              isThreeLine: true,
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _showApproveConfirmation(String userId) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("Approve User"),
+        content: Text("Are you sure you want to approve this user?"),
+        actions: [
+          TextButton(
+            child: Text("Cancel"),
+            onPressed: () => Navigator.pop(context),
+          ),
+          TextButton(
+            child: Text("Approve"),
+            onPressed: () {
+              Navigator.pop(context);
+              _approveUser(userId);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteConfirmation(String userId) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("Delete User"),
+        content: Text("Are you sure you want to delete this user? This action cannot be undone."),
+        actions: [
+          TextButton(
+            child: Text("Cancel"),
+            onPressed: () => Navigator.pop(context),
+          ),
+          TextButton(
+            child: Text("Delete", style: TextStyle(color: Colors.red)),
+            onPressed: () {
+              Navigator.pop(context);
+              _deleteUser(userId);
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.black,
       appBar: AppBar(
-        title: const Text('Admin Dashboard'),
+        title: Text("Admin Dashboard"),
+        backgroundColor: Colors.black,
+        elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.logout),
+            icon: Icon(Icons.refresh),
+            onPressed: _loadUsers,
+          ),
+          IconButton(
+            icon: Icon(Icons.logout),
             onPressed: widget.onLogout,
           ),
         ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildOverviewCards(),
-            const SizedBox(height: 20),
-            _buildStageChart(),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: [
+            Tab(text: "All Users"),
+            Tab(text: "Pending Approvals"),
           ],
+          indicator: BoxDecoration(
+            borderRadius: BorderRadius.circular(50),
+            color: Colors.blueAccent,
+          ),
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.grey,
         ),
       ),
-    );
-  }
-
-  Widget _buildOverviewCards() {
-    return Wrap(
-      spacing: 16,
-      runSpacing: 16,
-      children: [
-        _buildDashboardCard(
-            "Total Vehicles", totalVehicles.toString(), Colors.blue),
-        _buildDashboardCard("Active in Interactive Bay",
-            activeVehiclesInInteractiveBay.toString(), Colors.green),
-        _buildDashboardCard("Active in Maintenance",
-            activeVehiclesInMaintenance.toString(), Colors.orange),
-        _buildDashboardCard("Active in Washing",
-            activeVehiclesInWashing.toString(), Colors.red),
-        _buildDashboardCard("Active in Final Inspection",
-            activeVehiclesInFinalInspection.toString(), Colors.purple),
-      ],
-    );
-  }
-
-  Widget _buildDashboardCard(String title, String value, Color color) {
-    return Container(
-      width: MediaQuery.of(context).size.width / 2 - 24,
-      height: 150,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      body: TabBarView(
+        controller: _tabController,
         children: [
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
-              color: color,
-            ),
-          ),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
-          ),
+          _buildUserList(allUsers, false),
+          _buildUserList(pendingUsers, true),
         ],
       ),
-    );
-  }
-
-  Widget _buildStageChart() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              "Active Vehicles by Stage",
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 10),
-            SizedBox(
-              height: 300,
-              child: LineChart(
-                LineChartData(
-                  lineBarsData: [
-                    LineChartBarData(
-                      spots: stageData
-                          .asMap()
-                          .entries
-                          .map((entry) => FlSpot(entry.key.toDouble(),
-                              entry.value.activeVehicles.toDouble()))
-                          .toList(),
-                      isCurved: true,
-                      gradient: const LinearGradient(
-                        colors: [Colors.blue],
-                      ),
-                      barWidth: 5,
-                      isStrokeCapRound: true,
-                      dotData: FlDotData(show: true),
-                    ),
-                  ],
-                  titlesData: FlTitlesData(
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 30,
-                        interval: 1,
-                        getTitlesWidget: (value, meta) {
-                          return Text(
-                            value.toInt().toString(),
-                            style: const TextStyle(fontSize: 10),
-                          );
-                        },
-                      ),
-                    ),
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 30,
-                        interval: 1,
-                        getTitlesWidget: (value, meta) {
-                          if (value >= 0 && value < stageData.length) {
-                            return Text(
-                              stageData[value.toInt()].stageName,
-                              style: const TextStyle(fontSize: 10),
-                            );
-                          } else {
-                            return const Text('');
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                  gridData: FlGridData(show: true),
-                  borderData: FlBorderData(show: true),
-                ),
-              ),
-            ),
-          ],
-        ),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: Colors.blueAccent,
+        child: Icon(Icons.refresh),
+        onPressed: _loadUsers,
+        tooltip: 'Refresh Users',
       ),
     );
   }
-}
 
-class Vehicle {
-  final String vehicleNumber;
-  final List<dynamic> stages;
-
-  Vehicle({required this.vehicleNumber, required this.stages});
-
-  factory Vehicle.fromJson(Map<String, dynamic> json) {
-    return Vehicle(
-      vehicleNumber: json['vehicleNumber'],
-      stages: json['stages'],
-    );
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
-}
-
-class StageData {
-  final String stageName;
-  int activeVehicles;
-
-  StageData({required this.stageName, required this.activeVehicles});
 }
