@@ -175,6 +175,80 @@ router.post("/vehicle-check", async (req, res) => {
 });
 
 
+router.get("/vehicles/bay-allocation-started", async (req, res) => {
+  try {
+    const vehicles = await Vehicle.find({
+      "stages.stageName": "Bay Allocation Started",
+      "stages.eventType": "Start",
+    }).sort({ entryTime: -1 });
+
+    if (vehicles.length === 0) {
+      return res.status(404).json({ success: false, message: "No vehicles with Bay Allocation Started found." });
+    }
+
+    res.status(200).json({ success: true, vehicles });
+  } catch (error) {
+    console.error("❌ Error in GET /vehicles/bay-allocation-started:", error);
+    res.status(500).json({ success: false, message: "Server error", error });
+  }
+});
+
+// ✅ Fetch Bay Work In-Progress & Completed
+router.get("/vehicles/PMbay-work-in-progress", async (req, res) => {
+  try {
+    // ✅ Fetch all vehicles with Bay Work stages
+    const vehicles = await Vehicle.find({ "stages.stageName": { $regex: /^Bay Work:/ } });
+
+    const inProgressVehicles = [];
+    const finishedVehicles = [];
+
+    vehicles.forEach((vehicle) => {
+      const bayWorkStages = vehicle.stages.filter(stage => stage.stageName.startsWith("Bay Work:"));
+      
+      // ✅ Group by Work Type
+      const workTypeGroups = {};
+      bayWorkStages.forEach(stage => {
+        const workType = stage.workType || "Unknown";
+        if (!workTypeGroups[workType]) {
+          workTypeGroups[workType] = [];
+        }
+        workTypeGroups[workType].push(stage);
+      });
+
+      // ✅ Check for In-Progress or Completed Work
+      for (const [workType, stages] of Object.entries(workTypeGroups)) {
+        const lastStart = stages.findLast(stage => stage.eventType === "Start");
+        const lastEnd = stages.findLast(stage => stage.eventType === "End");
+
+        if (lastStart && (!lastEnd || new Date(lastStart.timestamp) > new Date(lastEnd.timestamp))) {
+          inProgressVehicles.push({
+            vehicleNumber: vehicle.vehicleNumber,
+            workType,
+            bayNumber: lastStart.bayNumber,
+            timestamp: lastStart.timestamp,
+            _id: vehicle._id,
+          });
+        } else if (lastStart && lastEnd) {
+          finishedVehicles.push({
+            vehicleNumber: vehicle.vehicleNumber,
+            workType,
+            bayNumber: lastStart.bayNumber,
+            timestamp: lastEnd.timestamp,
+            _id: vehicle._id,
+          });
+        }
+      }
+    });
+
+    res.status(200).json({ success: true, inProgressVehicles, finishedVehicles });
+  } catch (error) {
+    console.error("❌ Error in /vehicles/bay-work-in-progress:", error);
+    res.status(500).json({ success: false, message: "Server error", error });
+  }
+});
+
+
+
 
 // ✅ 2️⃣ GET: Fetch All Vehicles & Their Full Journey
 router.get("/vehicles", async (req, res) => {

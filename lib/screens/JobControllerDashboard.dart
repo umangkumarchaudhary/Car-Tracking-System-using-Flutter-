@@ -24,8 +24,6 @@ class _JobControllerDashboardState extends State<JobControllerDashboard>
   bool isScanning = false;
   bool isCameraOpen = false;
   String? vehicleNumber;
-  List<Map<String, dynamic>> allocatedVehicles = [];
-
 
   final TextEditingController _vehicleNumberController = TextEditingController();
   late AnimationController _animationController;
@@ -36,9 +34,8 @@ class _JobControllerDashboardState extends State<JobControllerDashboard>
     _animationController = AnimationController(
       duration: const Duration(milliseconds: 500),
       vsync: this,
-    );
-    fetchAllocatedVehicles();
-  }
+  );
+}
 
   @override
   void dispose() {
@@ -48,28 +45,24 @@ class _JobControllerDashboardState extends State<JobControllerDashboard>
   }
 
   String convertToIST(dynamic utcTimestamp) {
-  if (utcTimestamp == null) return "N/A"; // Handle null case
+    if (utcTimestamp == null) return "N/A";
 
-  DateTime dateTime;
-  try {
-    if (utcTimestamp is int) {
-      // Convert from milliseconds since epoch
-      dateTime = DateTime.fromMillisecondsSinceEpoch(utcTimestamp, isUtc: true);
-    } else if (utcTimestamp is String) {
-      // Convert from ISO 8601 string format
-      dateTime = DateTime.parse(utcTimestamp).toUtc();
-    } else {
-      return "Invalid Date"; // Unknown format
+    DateTime dateTime;
+    try {
+      if (utcTimestamp is int) {
+        dateTime = DateTime.fromMillisecondsSinceEpoch(utcTimestamp, isUtc: true);
+      } else if (utcTimestamp is String) {
+        dateTime = DateTime.parse(utcTimestamp).toUtc();
+      } else {
+        return "Invalid Date";
+      }
+
+      final istTime = dateTime.add(const Duration(hours: 5, minutes: 30));
+      return DateFormat('dd-MM-yyyy hh:mm a').format(istTime);
+    } catch (e) {
+      return "Invalid Date Format";
     }
-
-    // Convert to IST (UTC +5:30)
-    final istTime = dateTime.add(const Duration(hours: 5, minutes: 30));
-    return DateFormat('dd-MM-yyyy hh:mm a').format(istTime);
-  } catch (e) {
-    return "Invalid Date Format"; // If parsing fails
   }
-}
-
 
   void handleQRCode(String code) async {
     if (isScanning) return;
@@ -78,7 +71,7 @@ class _JobControllerDashboardState extends State<JobControllerDashboard>
     _vehicleNumberController.text = code;
     await fetchVehicleDetails(code);
     Future.delayed(const Duration(seconds: 2), () => isScanning = false);
-    setState(() => isCameraOpen = false); // Close camera after scan
+    setState(() => isCameraOpen = false);
   }
 
   Future<void> fetchVehicleDetails(String vehicleNumber) async {
@@ -105,7 +98,7 @@ class _JobControllerDashboardState extends State<JobControllerDashboard>
         });
       } else {
         setState(() {
-          this.vehicleNumber = vehicleNumber; // Allow new vehicle entry
+          this.vehicleNumber = vehicleNumber;
         });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Vehicle not found, proceeding as new entry.')),
@@ -145,7 +138,6 @@ class _JobControllerDashboardState extends State<JobControllerDashboard>
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Bay Allocation Started')),
         );
-        await fetchAllocatedVehicles(); // Refresh allocated vehicles
       }
     } catch (error) {
       print('Error starting Bay Allocation: $error');
@@ -157,50 +149,36 @@ class _JobControllerDashboardState extends State<JobControllerDashboard>
     }
   }
 
-  // Using the correct endpoint based on available routes in vehicleRoute.js
- Future<void> fetchAllocatedVehicles() async {
-  setState(() => isLoading = true);
-  
-  // Using the "/vehicles/bay-allocation-in-progress" endpoint from your vehicleRoute.js
-  final url = Uri.parse('$baseUrl/vehicle-check');
+  Future<List<dynamic>> fetchAllocatedVehicles() async {
+    final url = Uri.parse('$baseUrl/vehicles/bay-allocation-started');
 
-  try {
-    final response = await http.get(
-      url,
-      headers: {
-        'Authorization': 'Bearer ${widget.token}',
-        'Content-Type': 'application/json',
-      },
-    );
+    try {
+      final response = await http.get(
+        url,
+        headers: {
+          'Authorization': 'Bearer ${widget.token}',
+          'Content-Type': 'application/json',
+        },
+      );
 
-    final data = json.decode(response.body);
-    
-    if (data['success'] == true && data.containsKey('vehicles')) {
-      print('Allocated vehicles data: ${data['vehicles']}');
-      
-      // Handle the vehicles data as a List<String> instead of List<Map>
-      setState(() {
-        // Simple approach: just extract the vehicle numbers as strings
-        allocatedVehicles = List<Map<String, dynamic>>.from(data['vehicles'] ?? []);
-
-      });
-    } else {
-      print('No allocated vehicles found or error in response');
-      setState(() {
-        allocatedVehicles = [];
-      });
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['success'] == true && data.containsKey('vehicles')) {
+          return data['vehicles'];
+        } else {
+          print('No allocated vehicles found or error in response');
+          return [];
+        }
+      } else {
+        print('Failed to load allocated vehicles: ${response.statusCode}');
+        return Future.error('Failed to load allocated vehicles');
+      }
+    } catch (error) {
+      print('Error fetching allocated vehicles: $error');
+      return Future.error('Failed to load allocated vehicles');
     }
-  } catch (error) {
-    print('Error fetching allocated vehicles: $error');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Failed to load allocated vehicles: ${error.toString()}')),
-    );
-  } finally {
-    setState(() => isLoading = false);
   }
-}
 
-  // Show confirmation dialog before logout
   void _confirmLogout() {
     showDialog(
       context: context,
@@ -208,8 +186,8 @@ class _JobControllerDashboardState extends State<JobControllerDashboard>
         return AlertDialog(
           backgroundColor: Colors.grey.shade800,
           title: const Text('Confirm Logout', style: TextStyle(color: Colors.white)),
-          content: const Text('Are you sure you want to logout?', 
-                             style: TextStyle(color: Colors.white70)),
+          content: const Text('Are you sure you want to logout?',
+              style: TextStyle(color: Colors.white70)),
           actions: [
             TextButton(
               child: const Text('Cancel', style: TextStyle(color: Colors.blue)),
@@ -240,12 +218,11 @@ class _JobControllerDashboardState extends State<JobControllerDashboard>
         actions: [
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.white),
-            onPressed: _confirmLogout, // Use confirmation dialog for logout
+            onPressed: _confirmLogout,
           ),
         ],
       ),
       body: Container(
-        // Full screen coverage with no white space
         width: MediaQuery.of(context).size.width,
         height: MediaQuery.of(context).size.height,
         decoration: BoxDecoration(
@@ -261,7 +238,6 @@ class _JobControllerDashboardState extends State<JobControllerDashboard>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Scanner card
                 Card(
                   elevation: 8,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -303,8 +279,6 @@ class _JobControllerDashboardState extends State<JobControllerDashboard>
                   ),
                 ),
                 const SizedBox(height: 20),
-                
-                // Vehicle input field
                 FadeInDown(
                   controller: (controller) => _animationController = controller,
                   child: TextField(
@@ -330,8 +304,6 @@ class _JobControllerDashboardState extends State<JobControllerDashboard>
                   ),
                 ),
                 const SizedBox(height: 20),
-                
-                // Start allocation button
                 if (vehicleNumber != null)
                   FadeInUp(
                     child: Center(
@@ -349,8 +321,7 @@ class _JobControllerDashboardState extends State<JobControllerDashboard>
                     ),
                   ),
                 const SizedBox(height: 20),
-                
-                // Allocated vehicles section - expanded to fill remaining space
+                // Allocated vehicles section
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -360,8 +331,8 @@ class _JobControllerDashboardState extends State<JobControllerDashboard>
                           children: [
                             const Icon(Icons.list_alt, color: Colors.white),
                             const SizedBox(width: 8),
-                            Text('Allocated Vehicles:',
-                                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                            Text('History of Scanned QR:',
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
                             const Spacer(),
                             if (isLoading)
                               const SizedBox(
@@ -376,11 +347,18 @@ class _JobControllerDashboardState extends State<JobControllerDashboard>
                         ),
                       ),
                       const SizedBox(height: 10),
-                      
-                      // List of allocated vehicles
                       Expanded(
-                        child: allocatedVehicles.isEmpty
-                            ? FadeInRight(
+                        child: FutureBuilder<List<dynamic>>(
+                          future: fetchAllocatedVehicles(),
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState == ConnectionState.waiting) {
+                              return const Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white),));
+                            } else if (snapshot.hasError) {
+                              return Center(
+                                child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.red)),
+                              );
+                            } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                              return FadeInRight(
                                 child: Center(
                                   child: Column(
                                     mainAxisAlignment: MainAxisAlignment.center,
@@ -388,19 +366,19 @@ class _JobControllerDashboardState extends State<JobControllerDashboard>
                                       Icon(Icons.car_crash, color: Colors.grey.shade600, size: 48),
                                       const SizedBox(height: 16),
                                       Text(
-                                        'No vehicles allocated yet',
+                                        'No vehicles with Bay Allocation Started',
                                         style: TextStyle(color: Colors.grey.shade400, fontSize: 16),
                                       ),
                                     ],
                                   ),
                                 ),
-                              )
-                            : FadeInUp(
+                              );
+                            } else {
+                              return FadeInUp(
                                 child: ListView.builder(
-                                  shrinkWrap: true,
-                                  itemCount: allocatedVehicles.length,
+                                  itemCount: snapshot.data!.length,
                                   itemBuilder: (context, index) {
-                                    final vehicle = allocatedVehicles[index];
+                                    final vehicle = snapshot.data![index];
                                     return Card(
                                       elevation: 4,
                                       margin: const EdgeInsets.symmetric(vertical: 4),
@@ -408,26 +386,20 @@ class _JobControllerDashboardState extends State<JobControllerDashboard>
                                       shape: RoundedRectangleBorder(
                                         borderRadius: BorderRadius.circular(12),
                                       ),
-                                      child: ListTile(
-                                        leading: const Icon(Icons.location_on, color: Colors.white70),
-                                        title: Text(
-                                          '📍 ${allocatedVehicles[index]}',
-                                          style: const TextStyle(
-                                              color: Colors.white, fontWeight: FontWeight.bold),
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(12.0),
+                                        child: Text(
+                                          vehicle['vehicleNumber'] ?? 'Unknown Vehicle',
+                                          style: const TextStyle(color: Colors.white, fontSize: 16),
                                         ),
-                                           subtitle: vehicle is Map<String, dynamic> && vehicle["entryTime"] != null
-  ? Text(
-      'Entered: ${convertToIST(vehicle["entryTime"].toString())}', 
-      style: TextStyle(color: Colors.grey.shade300),
-    )
-  : Text("Entry time not available", style: TextStyle(color: Colors.grey.shade500)),
-
-
                                       ),
                                     );
                                   },
                                 ),
-                              ),
+                              );
+                            }
+                          },
+                        ),
                       ),
                     ],
                   ),
