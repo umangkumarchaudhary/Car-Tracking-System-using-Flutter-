@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  static const String baseUrl = "http://localhost:5000"; // Change this for deployment
+  static const String baseUrl = "https://mercedes-benz-car-tracking-system.onrender.com/api"; // Change this for deployment
 
   // ✅ Function to check in/out vehicle
   static Future<Map<String, dynamic>> checkVehicle(Map<String, dynamic> vehicleData) async {

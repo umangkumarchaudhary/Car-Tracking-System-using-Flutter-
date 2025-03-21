@@ -18,7 +18,7 @@ class HomeScreen extends StatelessWidget {
           )
         ],
       ),
-      body: Center(child: Text("Welcome to the Workshop Tracking System!")),
+      body: Center(child: Text("Welcome to the Workshop Tracking System! Please LogOut to Continue!!")),
     );
   }
 }

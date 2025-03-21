@@ -12,7 +12,9 @@ import 'package:car_tracking_new/screens/WashingDashboard.dart';
 import 'package:car_tracking_new/screens/BayTechnicianDashboard.dart';
 import 'package:car_tracking_new/screens/AdminDashboard.dart';
 
-const String BASE_URL = "http://192.168.108.49:5000/api";
+const String BASE_URL = "https://mercedes-benz-car-tracking-system.onrender.com/api";
+// Token refresh interval (4 hours in milliseconds)
+const int TOKEN_REFRESH_INTERVAL = 4 * 60 * 60 * 1000;
 
 void main() {
   runApp(MyApp());
@@ -36,7 +38,10 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen> {
   bool isLogin = true;
+  bool isLoading = true; // Added loading state for initial check
   String? token;
+  String? userRole;
+  Timer? _tokenRefreshTimer;
 
   @override
   void initState() {
@@ -44,37 +49,293 @@ class _AuthScreenState extends State<AuthScreen> {
     _checkLoggedIn();
   }
 
+  @override
+  void dispose() {
+    _tokenRefreshTimer?.cancel();
+    super.dispose();
+  }
+
   void _checkLoggedIn() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String? savedToken = prefs.getString('token');
-    if (savedToken != null) {
+    String? savedRole = prefs.getString('role');
+    bool? isApproved = prefs.getBool('isApproved');
+    
+    if (savedToken != null && savedRole != null && (isApproved == true || savedRole == "Admin")) {
+      // Verify token validity with the server before proceeding
+      try {
+        final response = await http.get(
+          Uri.parse("$BASE_URL/verify-token"),
+          headers: {"Authorization": "Bearer $savedToken"},
+        ).timeout(Duration(seconds: 5));
+        
+        if (response.statusCode == 200) {
+          setState(() {
+            token = savedToken;
+            userRole = savedRole;
+          });
+          
+          // Setup token refresh timer
+          _setupTokenRefreshTimer();
+          
+          // Navigate to the appropriate dashboard
+          _navigateToDashboard(savedToken, savedRole);
+        } else {
+          // Token is invalid, refresh it
+          _refreshToken(savedToken);
+        }
+      } catch (e) {
+        // If server is unreachable, use cached token anyway (offline access)
+        setState(() {
+          token = savedToken;
+          userRole = savedRole;
+          isLoading = false;
+        });
+        
+        // Navigate using cached credentials
+        _navigateToDashboard(savedToken, savedRole);
+      }
+    } else {
       setState(() {
-        token = savedToken;
+        isLoading = false;
       });
     }
+  }
+
+  void _refreshToken(String oldToken) async {
+    try {
+      final response = await http.post(
+        Uri.parse("$BASE_URL/refresh-token"),
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer $oldToken"
+        },
+      ).timeout(Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        String newToken = data["token"];
+        
+        // Save the new token
+        SharedPreferences prefs = await SharedPreferences.getInstance();
+        await prefs.setString('token', newToken);
+        
+        String? savedRole = prefs.getString('role');
+        
+        setState(() {
+          token = newToken;
+          userRole = savedRole;
+          isLoading = false;
+        });
+        
+        // Navigate to the appropriate dashboard
+        if (savedRole != null) {
+          _navigateToDashboard(newToken, savedRole);
+        }
+        
+        // Setup new refresh timer
+        _setupTokenRefreshTimer();
+      } else {
+        // If token refresh fails, logout user
+        _logout();
+      }
+    } catch (e) {
+      // On error, just proceed with the old token for now
+      setState(() {
+        isLoading = false;
+      });
+    }
+  }
+  
+  void _setupTokenRefreshTimer() {
+    // Cancel existing timer if any
+    _tokenRefreshTimer?.cancel();
+    
+    // Set new timer to refresh token every 4 hours
+    _tokenRefreshTimer = Timer.periodic(Duration(milliseconds: TOKEN_REFRESH_INTERVAL), (timer) {
+      if (token != null) {
+        _refreshToken(token!);
+      }
+    });
   }
 
   void _logout() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.remove('token');
+    await prefs.remove('role');
+    await prefs.remove('isApproved');
+    
+    // Cancel token refresh timer
+    _tokenRefreshTimer?.cancel();
+    
     setState(() {
       token = null;
+      userRole = null;
+      isLoading = false;
+    });
+  }
+  
+  void _navigateToDashboard(String token, String role) {
+    // Function to get logout handler for each dashboard
+    VoidCallback getLogoutHandler() {
+      return () async {
+        _logout();
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => AuthScreen()),
+        );
+      };
+    }
+    
+    Future.delayed(Duration.zero, () {
+      switch (role) {
+        case "Security Guard":
+          Navigator.pushReplacement(
+            context, 
+            MaterialPageRoute(
+              builder: (context) => SecurityGuardDashboard(
+                token: token,
+                onLogout: getLogoutHandler(),
+              ),
+            ),
+          );
+          break;
+        case "Active Reception Technician":
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ActiveReceptionDashboard(
+                token: token,
+                onLogout: getLogoutHandler(),
+              ),
+            ),
+          );
+          break;
+        case "Service Advisor":
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ServiceAdvisorDashboard(
+                token: token,
+                onLogout: getLogoutHandler(),
+              ),
+            ),
+          );
+          break;
+        case "Job Controller":
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => JobControllerDashboard(
+                token: token,
+                onLogout: getLogoutHandler(),
+              ),
+            ),
+          );
+          break;
+        case "Final Inspection Technician":
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => FinalInspectionDashboard(
+                token: token,
+                onLogout: getLogoutHandler(),
+              ),
+            ),
+          );
+          break;
+        case "Washing":
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => WashingDashboard(
+                token: token,
+                onLogout: getLogoutHandler(),
+              ),
+            ),
+          );
+          break;
+        case "Bay Technician":
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => BayTechnicianDashboard(
+                token: token,
+                onLogout: getLogoutHandler(),
+              ),
+            ),
+          );
+          break;
+        case "Admin":
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => AdminDashboard(
+                token: token,
+                onLogout: getLogoutHandler(),
+              ),
+            ),
+          );
+          break;
+        default:
+          // Handle unknown role
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Invalid role. Please login again.")),
+          );
+          _logout();
+          break;
+      }
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    if (isLoading) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Image.asset(
+                'assets/mercedes_logo.jpg',
+                height: 100,
+              ),
+              SizedBox(height: 30),
+              CircularProgressIndicator(color: Colors.white),
+              SizedBox(height: 20),
+              Text(
+                "Loading...",
+                style: TextStyle(color: Colors.white, fontSize: 16),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    
     return token != null
         ? HomeScreen(token: token!, logout: _logout)
         : isLogin
-            ? LoginScreen(switchMode: () => setState(() => isLogin = false))
+            ? LoginScreen(
+                switchMode: () => setState(() => isLogin = false),
+                onLoginSuccess: (newToken, role) {
+                  setState(() {
+                    token = newToken;
+                    userRole = role;
+                  });
+                  _setupTokenRefreshTimer();
+                },
+              )
             : RegisterScreen(switchMode: () => setState(() => isLogin = true));
   }
 }
 
 class LoginScreen extends StatefulWidget {
   final VoidCallback switchMode;
-  LoginScreen({required this.switchMode});
+  final Function(String token, String role) onLoginSuccess;
+  
+  LoginScreen({required this.switchMode, required this.onLoginSuccess});
 
   @override
   _LoginScreenState createState() => _LoginScreenState();
@@ -84,8 +345,38 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController mobileController = TextEditingController();
   String selectedRole = "Security Guard";
   bool isLoading = false;
+  bool rememberMe = true; // Default to true for better UX
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedCredentials();
+  }
+
+  void _loadSavedCredentials() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? savedMobile = prefs.getString('lastMobile');
+    String? savedRole = prefs.getString('lastRole');
+    
+    if (savedMobile != null) {
+      setState(() {
+        mobileController.text = savedMobile;
+      });
+    }
+    
+    if (savedRole != null) {
+      setState(() {
+        selectedRole = savedRole;
+      });
+    }
+  }
 
   void _login() async {
+    if (mobileController.text.isEmpty) {
+      _showSnackBar("Please enter mobile number");
+      return;
+    }
+
     setState(() => isLoading = true);
 
     try {
@@ -98,18 +389,28 @@ class _LoginScreenState extends State<LoginScreen> {
               "role": selectedRole,
             }),
           )
-          .timeout(Duration(seconds: 10));
+          .timeout(Duration(seconds: 15)); // Increased timeout for slower networks
 
       setState(() => isLoading = false);
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200) {
+        // Save credentials if "Remember Me" is checked
+        if (rememberMe) {
+          SharedPreferences prefs = await SharedPreferences.getInstance();
+          await prefs.setString("lastMobile", mobileController.text);
+          await prefs.setString("lastRole", selectedRole);
+        }
+        
+        // Store user token, role and approval status
         SharedPreferences prefs = await SharedPreferences.getInstance();
         await prefs.setString("token", data["token"]);
-        
-        // Store user approval status
+        await prefs.setString("role", selectedRole);
         await prefs.setBool("isApproved", data["user"]["isApproved"] ?? false);
-
+        
+        // Notify the parent widget about successful login
+        widget.onLoginSuccess(data["token"], selectedRole);
+        
         // Navigate based on role
         switch (selectedRole) {
           case "Security Guard":
@@ -121,6 +422,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   onLogout: () async {
                     SharedPreferences prefs = await SharedPreferences.getInstance();
                     await prefs.remove('token');
+                    await prefs.remove('role');
+                    await prefs.remove('isApproved');
                     Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(builder: (context) => AuthScreen()),
@@ -140,6 +443,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   onLogout: () async {
                     SharedPreferences prefs = await SharedPreferences.getInstance();
                     await prefs.remove('token');
+                    await prefs.remove('role');
+                    await prefs.remove('isApproved');
                     Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(builder: (context) => AuthScreen()),
@@ -159,6 +464,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   onLogout: () async {
                     SharedPreferences prefs = await SharedPreferences.getInstance();
                     await prefs.remove('token');
+                    await prefs.remove('role');
+                    await prefs.remove('isApproved');
                     Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(builder: (context) => AuthScreen()),
@@ -178,6 +485,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   onLogout: () async {
                     SharedPreferences prefs = await SharedPreferences.getInstance();
                     await prefs.remove('token');
+                    await prefs.remove('role');
+                    await prefs.remove('isApproved');
                     Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(builder: (context) => AuthScreen()),
@@ -197,6 +506,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   onLogout: () async {
                     SharedPreferences prefs = await SharedPreferences.getInstance();
                     await prefs.remove('token');
+                    await prefs.remove('role');
+                    await prefs.remove('isApproved');
                     Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(builder: (context) => AuthScreen()),
@@ -216,6 +527,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   onLogout: () async {
                     SharedPreferences prefs = await SharedPreferences.getInstance();
                     await prefs.remove('token');
+                    await prefs.remove('role');
+                    await prefs.remove('isApproved');
                     Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(builder: (context) => AuthScreen()),
@@ -235,6 +548,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   onLogout: () async {
                     SharedPreferences prefs = await SharedPreferences.getInstance();
                     await prefs.remove('token');
+                    await prefs.remove('role');
+                    await prefs.remove('isApproved');
                     Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(builder: (context) => AuthScreen()),
@@ -254,6 +569,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   onLogout: () async {
                     SharedPreferences prefs = await SharedPreferences.getInstance();
                     await prefs.remove('token');
+                    await prefs.remove('role');
+                    await prefs.remove('isApproved');
                     Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(builder: (context) => AuthScreen()),
@@ -269,11 +586,11 @@ class _LoginScreenState extends State<LoginScreen> {
             break;
         }
       } else {
-        _showSnackBar(data["message"]);
+        _showSnackBar(data["message"] ?? "Login failed. Please try again.");
       }
     } catch (e) {
       setState(() => isLoading = false);
-      _showSnackBar("Login failed! Check internet & server.");
+      _showSnackBar("Login failed! Check internet connection and try again.");
     }
   }
 
@@ -349,6 +666,27 @@ class _LoginScreenState extends State<LoginScreen> {
                 );
               }).toList(),
             ),
+            SizedBox(height: 10),
+            // Remember Me Checkbox
+            Row(
+              children: [
+                Checkbox(
+                  value: rememberMe,
+                  onChanged: (value) {
+                    setState(() {
+                      rememberMe = value ?? true;
+                    });
+                  },
+                  checkColor: Colors.black,
+                  fillColor: MaterialStateProperty.resolveWith(
+                      (states) => Colors.grey[400]),
+                ),
+                Text(
+                  "Remember Me",
+                  style: TextStyle(color: Colors.grey[400]),
+                ),
+              ],
+            ),
             SizedBox(height: 20),
             // Login Button
             isLoading
@@ -356,7 +694,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 : ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.blueAccent,
-                      
                       padding:
                           EdgeInsets.symmetric(vertical: 15, horizontal: 80),
                       shape: RoundedRectangleBorder(
@@ -399,6 +736,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool isLoading = false;
 
   void _register() async {
+    // Validate inputs
+    if (nameController.text.isEmpty) {
+      _showSnackBar("Name is required");
+      return;
+    }
+    
+    if (mobileController.text.isEmpty) {
+      _showSnackBar("Mobile number is required");
+      return;
+    }
+    
     setState(() => isLoading = true);
 
     try {
@@ -413,10 +761,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               "role": selectedRole,
             }),
           )
-          .timeout(Duration(seconds: 10));
-
-      print("Response Code: ${response.statusCode}");
-      print("Response Body: ${response.body}");
+          .timeout(Duration(seconds: 15));
 
       setState(() => isLoading = false);
       final data = jsonDecode(response.body);
@@ -429,12 +774,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
         }
         widget.switchMode();
       } else {
-        _showSnackBar(data["message"]);
+        _showSnackBar(data["message"] ?? "Registration failed. Please try again.");
       }
     } catch (e) {
       setState(() => isLoading = false);
-      _showSnackBar("Registration failed! Check internet & server.");
-      print("Error: $e");
+      _showSnackBar("Registration failed! Check internet connection and try again.");
     }
   }
 
@@ -529,6 +873,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               value: selectedRole,
               onChanged: (newValue) => setState(() => selectedRole = newValue!),
               items: [
+                "Admin",
                 "Security Guard",
                 "Active Reception Technician",
                 "Service Advisor",
@@ -584,6 +929,8 @@ class HomeScreen extends StatelessWidget {
   void _logout(BuildContext context) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.remove('token');
+    await prefs.remove('role');
+    await prefs.remove('isApproved');
     logout();
     Navigator.pushReplacement(
       context,
