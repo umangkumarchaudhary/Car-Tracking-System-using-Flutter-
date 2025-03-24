@@ -25,6 +25,9 @@ dependencies:
   mobile_scanner: ^6.0.7
   provider: ^6.1.2
   flutter_animate: ^4.5.0
+  glassmorphism: ^3.0.0
+  lottie: ^2.3.2
+  
 
 dev_dependencies:
   flutter_test:
@@ -37,6 +40,8 @@ flutter:
   assets:
     - assets/mercedes_logo.jpg
     - assets/appicon.jpeg  # ✅ Ensure appicon.jpeg exists in assets folder
+    - assets/Animation.json
+    - assets/mercedes_dark_pattern.jfif
 
 flutter_icons:
   android: true
