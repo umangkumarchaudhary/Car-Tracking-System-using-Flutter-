@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:animate_do/animate_do.dart';
 
-const String baseUrl = 'https://mercedes-benz-car-tracking-system.onrender.com/api';
+const String baseUrl = 'http://192.168.58.49:5000/api';
 
 class ServiceAdvisorDashboard extends StatefulWidget {
   final String token;
@@ -247,6 +247,59 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
     }
   }
 
+  Future<void> readyForWashing() async {
+    if (vehicleNumber == null) return;
+    setState(() => isLoading = true);
+    _animationController.reset();
+    _animationController.forward();
+
+    final url = Uri.parse('$baseUrl/vehicle-check');
+    try {
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${widget.token}',
+        },
+        body: json.encode({
+          'vehicleNumber': vehicleNumber,
+          'role': 'Service Advisor',
+          'stageName': 'Ready for Washing',  // Make sure this matches exactly with backend
+          'eventType': 'Start',
+        }),
+      );
+
+      final data = json.decode(response.body);
+      if (data['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Vehicle marked as Ready for Washing'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        // Fetch the updated vehicle details
+        fetchVehicleDetails(vehicleNumber!, isQRScan: true);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(data['message'] ?? 'Failed to mark as Ready for Washing'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (error) {
+      print('Error marking ready for washing: $error');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Error marking ready for washing. Please try again.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() => isLoading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -413,6 +466,7 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
                               Wrap(
                                 alignment: WrapAlignment.center,
                                 spacing: 10.0,
+                                runSpacing: 10.0,
                                 children: [
                                   ElevatedButton.icon(
                                     style: ElevatedButton.styleFrom(
@@ -439,6 +493,20 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
                                     icon: const Icon(Icons.build, color: Colors.white),
                                     label: const Text(
                                       'Additional Work',
+                                      style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.purple.shade700,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                                      elevation: 8,
+                                    ),
+                                    onPressed: vehicleNumber != null ? readyForWashing : null,
+                                    icon: const Icon(Icons.local_car_wash, color: Colors.white),
+                                    label: const Text(
+                                      'Ready for Washing',
                                       style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
                                     ),
                                   ),

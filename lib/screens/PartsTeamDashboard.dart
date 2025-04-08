@@ -7,33 +7,29 @@ import 'package:intl/intl.dart';
 // Define the base URL
 const String baseUrl = 'http://192.168.58.49:5000/api';
 
-class FinalInspectionDashboard extends StatefulWidget {
+class PartsTeamDashboard extends StatefulWidget {
   final String token;
   final VoidCallback onLogout;
 
-  const FinalInspectionDashboard({
-    Key? key,
-    required this.token,
-    required this.onLogout,
-  }) : super(key: key);
+  const PartsTeamDashboard({Key? key, required this.token, required this.onLogout}) : super(key: key);
 
   @override
-  _FinalInspectionDashboardState createState() => _FinalInspectionDashboardState();
+  _PartsTeamDashboardState createState() => _PartsTeamDashboardState();
 }
 
-class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
+class _PartsTeamDashboardState extends State<PartsTeamDashboard> {
   bool isLoading = false;
+
   List<Map<String, dynamic>> inProgressVehicles = [];
   List<Map<String, dynamic>> finishedVehicles = [];
+
   final TextEditingController _vehicleNumberController = TextEditingController();
+
   String? vehicleId;
   bool isCameraOpen = false;
   bool isScanning = false;
-  bool hasStartedFinalInspection = false;
-  bool showInProgress = true;
-  Map<String, bool> expanded = {};
+  bool hasStartedEstimate = false; // Tracks if estimate creation has started
 
-  // Convert UTC to IST
   String convertToIST(String utcTimestamp) {
     final dateFormat = DateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
     final utcTime = dateFormat.parseUTC(utcTimestamp);
@@ -41,14 +37,13 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
     return DateFormat('dd-MM-yyyy hh:mm a').format(istTime);
   }
 
-  // Handle QR Code Scanning
   void handleQRCode(String code) async {
     if (isScanning) return;
     isScanning = true;
 
     print('QR Code Scanned: $code');
     _vehicleNumberController.text = code;
-    await fetchVehicleDetails(code);
+    await fetchVehicleDetails(code); // Fetch details upon scanning
 
     Future.delayed(const Duration(seconds: 2), () => isScanning = false);
   }
@@ -86,18 +81,18 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
           print('🚗 Checking vehicle: $vehicleNumber');
           print('📜 Stages: $stages');
 
-          final List<dynamic> finalInspectionStages = stages
-              .where((stage) => stage['stageName'] == 'Final Inspection')
+          final List<dynamic> partsStages = stages
+              .where((stage) => stage['stageName'] == 'Creation of Parts Estimate')
               .toList();
 
-          print('🔍 Final Inspection Stages for $vehicleNumber: $finalInspectionStages');
+          print('🔍 Parts Estimate Stages for $vehicleNumber: $partsStages');
 
-          if (finalInspectionStages.isNotEmpty) {
-            final lastEvent = finalInspectionStages.last;
+          if (partsStages.isNotEmpty) {
+            final lastEvent = partsStages.last;
             final String lastEventType = lastEvent['eventType'];
-            final String startTime = convertToIST(finalInspectionStages.first['timestamp']);
-            final String? endTime = (finalInspectionStages.length > 1)
-                ? convertToIST(finalInspectionStages.last['timestamp'])
+            final String startTime = convertToIST(partsStages.first['timestamp']);
+            final String? endTime = (partsStages.length > 1)
+                ? convertToIST(partsStages.last['timestamp'])
                 : null;
 
             print('📍 Last Event Type: $lastEventType');
@@ -116,7 +111,7 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
               });
             }
           } else {
-            print('❌ No Final Inspection stage found for $vehicleNumber');
+            print('❌ No Parts Estimate stage found for $vehicleNumber');
           }
         }
 
@@ -138,7 +133,7 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
   }
 
   Future<void> fetchVehicleDetails(String vehicleNumber) async {
-    final url = Uri.parse('$baseUrl/vehicles/$vehicleNumber');
+    final url = Uri.parse('$baseUrl/vehicles/$vehicleNumber'); // Adjust API as needed
 
     try {
       final response = await http.get(
@@ -155,8 +150,8 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
       if (data['success'] == true && data.containsKey('vehicle')) {
         setState(() {
           vehicleId = data['vehicle']['_id'];
-          hasStartedFinalInspection = data['vehicle']['stages'].any(
-            (stage) => stage['stageName'] == 'Final Inspection' && stage['eventType'] == 'Start');
+          hasStartedEstimate = data['vehicle']['stages'].any((stage) => 
+            stage['stageName'] == 'Creation of Parts Estimate' && stage['eventType'] == 'Start');
         });
       } else {
         print('❌ Vehicle not found');
@@ -180,8 +175,8 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
                   backgroundColor: Colors.blueGrey,
                 ),
                 onPressed: () async {
-                  Navigator.pop(context);
-                  await startReception();
+                  Navigator.pop(context); // Dismiss the dialog
+                  await startPartsEstimate();
                 },
                 child: const Text('Register'),
               ),
@@ -194,12 +189,13 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
     }
   }
 
-  Future<void> startReception() async {
+  Future<void> startPartsEstimate() async {
     if (_vehicleNumberController.text.isEmpty) {
-      print('Start Reception: No vehicle number entered');
+      print('Start Parts Estimate: No vehicle number entered');
       return;
     }
-    print('Starting reception for: ${_vehicleNumberController.text}');
+
+    print('Starting parts estimate for: ${_vehicleNumberController.text}');
     setState(() => isLoading = true);
 
     final url = Uri.parse('$baseUrl/vehicle-check');
@@ -212,42 +208,42 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
         },
         body: json.encode({
           'vehicleNumber': _vehicleNumberController.text,
-          'role': 'Final Inspection Technician',
-          'stageName': 'Final Inspection',
+          'role': 'Parts Team',
+          'stageName': 'Creation of Parts Estimate',
           'eventType': 'Start',
         }),
       );
 
       final data = json.decode(response.body);
-      print('Start Reception Response: $data');
+      print('Start Parts Estimate Response: $data');
 
       if (data['success'] == true) {
         vehicleId = data['vehicle']['_id'];
         setState(() {
-          hasStartedFinalInspection = true;
+          hasStartedEstimate = true; // UPDATE STATE
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Final Inspection started')),
+          const SnackBar(content: Text('Parts Estimate creation started')),
         );
       } else {
-        print('❌ Start Reception Error: ${data['message']}');
+        print('❌ Start Parts Estimate Error: ${data['message']}');
 
         if (data['message']?.contains('already started') == true) {
-          print('🔄 Final Inspection already started, refreshing details...');
+          print('🔄 Parts Estimate already started, refreshing details...');
           await fetchVehicleDetails(_vehicleNumberController.text);
 
           setState(() {
-            hasStartedFinalInspection = true;
+            hasStartedEstimate = true;
           });
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(data['message'] ?? 'Failed to start inspection')),
+            SnackBar(content: Text(data['message'] ?? 'Failed to start parts estimate')),
           );
         }
       }
     } catch (error) {
-      print('Error starting Final Inspection: $error');
+      print('Error starting Parts Estimate: $error');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Error processing vehicle start')),
       );
@@ -256,8 +252,8 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
     }
   }
 
-  Future<void> endReceptionForVehicle(String vehicleNumber) async {
-    print('Ending Final Inspection for: $vehicleNumber');
+  Future<void> endPartsEstimateForVehicle(String vehicleNumber) async {
+    print('Ending Parts Estimate for: $vehicleNumber');
 
     final url = Uri.parse('$baseUrl/vehicle-check');
     try {
@@ -269,79 +265,33 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
         },
         body: json.encode({
           'vehicleNumber': vehicleNumber,
-          'role': 'Final Inspection Technician',
-          'stageName': 'Final Inspection',
+          'role': 'Parts Team',
+          'stageName': 'Creation of Parts Estimate',
           'eventType': 'End',
         }),
       );
 
       final data = json.decode(response.body);
-      print('End Final Inspection Response: $data');
+      print('End Parts Estimate Response: $data');
 
       if (data['success'] == true) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Final Inspection completed for $vehicleNumber')),
+          SnackBar(content: Text('Parts Estimate completed for $vehicleNumber')),
         );
         setState(() {
-          hasStartedFinalInspection = false;
+          hasStartedEstimate = false; // RESET STATE AFTER ENDING
         });
+
         fetchAllVehicles();
       } else {
-        print('❌ End Final Inspection Error: ${data['message']}');
+        print('❌ End Parts Estimate Error: ${data['message']}');
       }
     } catch (error) {
-      print('Error ending Final Inspection: $error');
+      print('Error ending Parts Estimate: $error');
     }
   }
 
-  Future<Map<String, dynamic>?> fetchUserProfile() async {
-    final url = Uri.parse('$baseUrl/profile');
-    try {
-      final response = await http.get(
-        url,
-        headers: {
-          'Authorization': 'Bearer ${widget.token}',
-          'Content-Type': 'application/json',
-        },
-      );
-
-      final data = json.decode(response.body);
-      if (data['success'] == true && data.containsKey('profile')) {
-        return data['profile'];
-      }
-      return null;
-    } catch (error) {
-      print('Error fetching profile: $error');
-      return null;
-    }
-  }
-
-  Widget _buildProfileItem(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 14,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  bool showInProgress = true;
 
   List<Map<String, dynamic>> sortVehicles(List<Map<String, dynamic>> vehicles) {
     vehicles.sort((a, b) {
@@ -364,10 +314,13 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
     return groupedVehicles;
   }
 
+  Map<String, bool> expanded = {};
+
   @override
   Widget build(BuildContext context) {
     final sortedInProgressVehicles = sortVehicles([...inProgressVehicles]);
     final sortedFinishedVehicles = sortVehicles([...finishedVehicles]);
+
     final groupedInProgressVehicles = groupVehiclesByDate(sortedInProgressVehicles);
     final groupedFinishedVehicles = groupVehiclesByDate(sortedFinishedVehicles);
 
@@ -375,46 +328,11 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
       backgroundColor: Colors.grey[900],
       appBar: AppBar(
         backgroundColor: Colors.black87,
-        title: const Text('Final Inspection Dashboard', style: TextStyle(color: Colors.white)),
+        title: const Text('Parts Team Dashboard', style: TextStyle(color: Colors.white)),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: fetchAllVehicles,
-          ),
-          IconButton(
-            icon: const Icon(Icons.account_circle, color: Colors.white),
-            onPressed: () async {
-              final profile = await fetchUserProfile();
-              if (profile != null) {
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    backgroundColor: Colors.grey[900],
-                    title: const Text('User Profile', style: TextStyle(color: Colors.white)),
-                    content: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildProfileItem('Name', profile['name']),
-                        _buildProfileItem('Email', profile['email']),
-                        _buildProfileItem('Mobile', profile['mobile']),
-                        _buildProfileItem('Role', profile['role']),
-                      ],
-                    ),
-                    actions: [
-                      TextButton(
-                        child: const Text('Close', style: TextStyle(color: Colors.white)),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ],
-                  ),
-                );
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Failed to load profile')),
-                );
-              }
-            },
           ),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.white),
@@ -480,7 +398,9 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
               readOnly: true,
             ),
             const SizedBox(height: 20),
-            (vehicleId != null && hasStartedFinalInspection)
+
+            // Conditionally render "Start" or "End" button
+            (vehicleId != null && hasStartedEstimate)
                 ? ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       foregroundColor: Colors.white,
@@ -489,13 +409,13 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
                       textStyle: const TextStyle(fontSize: 18),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
-                    onPressed: isLoading ? null : () => endReceptionForVehicle(_vehicleNumberController.text),
+                    onPressed: isLoading ? null : () => endPartsEstimateForVehicle(_vehicleNumberController.text),
                     child: isLoading
                         ? const SizedBox(
                             height: 24,
                             width: 24,
                             child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white)))
-                        : const Text('End Final Inspection'),
+                        : const Text('End Estimate'),
                   )
                 : ElevatedButton(
                     style: ElevatedButton.styleFrom(
@@ -505,13 +425,13 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
                       textStyle: const TextStyle(fontSize: 18),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
-                    onPressed: isLoading ? null : startReception,
+                    onPressed: isLoading ? null : startPartsEstimate,
                     child: isLoading
                         ? const SizedBox(
                             height: 24,
                             width: 24,
                             child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white)))
-                        : const Text('Start Final Inspection'),
+                        : const Text('Start Estimate'),
                   ),
             const SizedBox(height: 30),
             Row(
@@ -543,22 +463,77 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
             ),
             const SizedBox(height: 20),
             Expanded(
-              child: ListView(
-                children: (showInProgress ? inProgressVehicles : finishedVehicles).map((vehicle) {
-                  return Card(
-                    color: Colors.grey[800],
-                    margin: const EdgeInsets.symmetric(vertical: 5),
-                    child: ListTile(
-                      leading: Icon(showInProgress ? Icons.directions_car : Icons.check_circle_outline,
-                          color: Colors.white70),
-                      title: Text(vehicle['vehicleNumber'], style: const TextStyle(color: Colors.white)),
-                      subtitle: Text(
-                          'Start: ${vehicle['startTime'] ?? 'N/A'} ${showInProgress ? '' : '\nEnd: ${vehicle['endTime'] ?? 'N/A'}'}',
-                          style: TextStyle(color: Colors.grey[400])),
+              child: showInProgress
+                  ? ListView(
+                      children: groupedInProgressVehicles.keys.map((date) {
+                        final vehicles = groupedInProgressVehicles[date]!;
+                        return Column(
+                          children: [
+                            ListTile(
+                              title: Text(date, style: const TextStyle(color: Colors.white)),
+                              trailing: IconButton(
+                                icon: Icon(expanded[date] ?? false ? Icons.expand_less : Icons.expand_more, color: Colors.white70),
+                                onPressed: () {
+                                  setState(() {
+                                    expanded[date] = !(expanded[date] ?? false);
+                                  });
+                                },
+                              ),
+                            ),
+                            if (expanded[date] ?? false)
+                              Column(
+                                children: vehicles.map((vehicle) {
+                                  return Card(
+                                    color: Colors.grey[800],
+                                    margin: const EdgeInsets.symmetric(vertical: 5),
+                                    child: ListTile(
+                                      leading: const Icon(Icons.directions_car, color: Colors.white70),
+                                      title: Text('Vehicle No: ${vehicle['vehicleNumber']}', style: const TextStyle(color: Colors.white)),
+                                      subtitle: Text('Start Time: ${vehicle['startTime']}', style: TextStyle(color: Colors.grey[400])),
+                                    ),
+                                  );
+                                }).toList(),
+                              ),
+                          ],
+                        );
+                      }).toList(),
+                    )
+                  : ListView(
+                      children: groupedFinishedVehicles.keys.map((date) {
+                        final vehicles = groupedFinishedVehicles[date]!;
+                        return Column(
+                          children: [
+                            ListTile(
+                              title: Text(date, style: const TextStyle(color: Colors.white)),
+                              trailing: IconButton(
+                                icon: Icon(expanded[date] ?? false ? Icons.expand_less : Icons.expand_more, color: Colors.white70),
+                                onPressed: () {
+                                  setState(() {
+                                    expanded[date] = !(expanded[date] ?? false);
+                                  });
+                                },
+                              ),
+                            ),
+                            if (expanded[date] ?? false)
+                              Column(
+                                children: vehicles.map((vehicle) {
+                                  return Card(
+                                    color: Colors.grey[800],
+                                    margin: const EdgeInsets.symmetric(vertical: 5),
+                                    child: ListTile(
+                                      leading: const Icon(Icons.check_circle_outline, color: Colors.white70),
+                                      title: Text('Vehicle No: ${vehicle['vehicleNumber']}', style: const TextStyle(color: Colors.white)),
+                                      subtitle: Text(
+                                          'Start Time: ${vehicle['startTime']}\nEnd Time: ${vehicle['endTime']}',
+                                          style: TextStyle(color: Colors.grey[400])),
+                                    ),
+                                  );
+                                }).toList(),
+                              ),
+                          ],
+                        );
+                      }).toList(),
                     ),
-                  );
-                }).toList(),
-              ),
             ),
           ],
         ),

@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
 // Define the base URL
-const String baseUrl = 'https://mercedes-benz-car-tracking-system.onrender.com/api';
+const String baseUrl = 'http://192.168.58.49:5000/api';
 
 class ActiveReceptionDashboard extends StatefulWidget {
   final String token;
@@ -30,6 +30,10 @@ class _ActiveReceptionDashboardState extends State<ActiveReceptionDashboard> {
   bool isCameraOpen = false;
   bool isScanning = false; // Prevent multiple QR scans
   bool isStartButtonPressed = false; // Flag to track if start button is pressed
+  
+  // User profile data
+  Map<String, dynamic> userProfile = {};
+  bool isProfileLoading = false;
 
   @override
   void initState() {
@@ -63,6 +67,107 @@ class _ActiveReceptionDashboardState extends State<ActiveReceptionDashboard> {
   }
 
   bool requestInProgress = false; // Prevent duplicate requests
+
+  // Fetch user profile data
+  Future<void> fetchUserProfile() async {
+    setState(() => isProfileLoading = true);
+    final url = Uri.parse('$baseUrl/profile');
+    print('🔄 Fetching user profile from: $url');
+
+    try {
+      final response = await http.get(
+        url,
+        headers: {
+          'Authorization': 'Bearer ${widget.token}',
+          'Content-Type': 'application/json',
+        },
+      );
+
+      print('📩 Profile API Response Status Code: ${response.statusCode}');
+
+      final data = json.decode(response.body);
+
+      if (data['success'] == true && data.containsKey('profile')) {
+        setState(() {
+          userProfile = data['profile'];
+        });
+        print('✅ User profile fetched: $userProfile');
+      } else {
+        print('❌ Unexpected API response format or "profile" key missing');
+      }
+    } catch (error) {
+      print('❌ Error fetching user profile: $error');
+    } finally {
+      setState(() => isProfileLoading = false);
+    }
+  }
+
+  // Show user profile dialog
+    // Show user profile dialog
+  void showProfileDialog() async {
+    await fetchUserProfile(); // Fetch the profile before showing the dialog
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: Text(
+          'User Profile',
+          style: TextStyle(
+            color: Colors.white,
+            fontFamily: 'MercedesBenz',
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: isProfileLoading
+            ? Center(child: CircularProgressIndicator())
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ListTile(
+                    leading: Icon(Icons.person, color: Colors.blue),
+                    title: Text('Name', style: TextStyle(color: Colors.grey)),
+                    subtitle: Text(
+                      userProfile['name'] ?? 'Not available',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                  ListTile(
+                    leading: Icon(Icons.email, color: Colors.blue),
+                    title: Text('Email', style: TextStyle(color: Colors.grey)),
+                    subtitle: Text(
+                      userProfile['email'] ?? 'Not available',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                  ListTile(
+                    leading: Icon(Icons.phone, color: Colors.blue),
+                    title: Text('Mobile', style: TextStyle(color: Colors.grey)),
+                    subtitle: Text(
+                      userProfile['mobile'] ?? 'Not available',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                  ListTile(
+                    leading: Icon(Icons.work, color: Colors.blue),
+                    title: Text('Role', style: TextStyle(color: Colors.grey)),
+                    subtitle: Text(
+                      userProfile['role'] ?? 'Not available',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Close', style: TextStyle(color: Colors.blue)),
+          ),
+        ],
+      ),
+    );
+  }
+
 
   Future<void> fetchAllVehicles() async {
     setState(() => isLoading = true);
@@ -110,6 +215,13 @@ class _ActiveReceptionDashboardState extends State<ActiveReceptionDashboard> {
             final String? endTime = (interactiveStages.length > 1)
                 ? convertToIST(interactiveStages.last['timestamp'])
                 : null;
+            
+            // Get user names from performedBy field
+            final String? startUserName = interactiveStages.first.containsKey('performedBy') ? 
+                interactiveStages.first['performedBy']['userName'] : null;
+            final String? endUserName = (interactiveStages.length > 1 && 
+                interactiveStages.last.containsKey('performedBy')) ? 
+                interactiveStages.last['performedBy']['userName'] : null;
 
             print('📍 Last Event Type: $lastEventType');
 
@@ -118,12 +230,16 @@ class _ActiveReceptionDashboardState extends State<ActiveReceptionDashboard> {
                 'vehicleNumber': vehicleNumber,
                 'startTime': startTime,
                 'endTime': null,
+                'startUserName': startUserName ?? 'Unknown',
+                'endUserName': null,
               });
             } else if (lastEventType == 'End') {
               finished.add({
                 'vehicleNumber': vehicleNumber,
                 'startTime': startTime,
                 'endTime': endTime,
+                'startUserName': startUserName ?? 'Unknown',
+                'endUserName': endUserName ?? 'Unknown',
               });
             }
           } else {
@@ -195,7 +311,7 @@ class _ActiveReceptionDashboardState extends State<ActiveReceptionDashboard> {
         },
         body: json.encode({
           'vehicleNumber': _vehicleNumberController.text,
-          'role': 'Inspection Technician',
+          'role': 'Active Reception Technician',
           'stageName': 'Interactive Bay',
           'eventType': 'Start',
         }),
@@ -257,7 +373,7 @@ class _ActiveReceptionDashboardState extends State<ActiveReceptionDashboard> {
         },
         body: json.encode({
           'vehicleNumber': vehicleNumber,
-          'role': 'Inspection Technician',
+          'role': 'Active Reception Technician',
           'stageName': 'Interactive Bay',
           'eventType': 'End',
         }),
@@ -378,6 +494,11 @@ class _ActiveReceptionDashboardState extends State<ActiveReceptionDashboard> {
             icon: Icon(Icons.refresh, color: Colors.white),
             onPressed: fetchAllVehicles,
             tooltip: 'Refresh Vehicle Data',
+          ),
+          IconButton(
+            icon: Icon(Icons.account_circle, color: Colors.white),
+            onPressed: showProfileDialog,
+            tooltip: 'Profile',
           ),
           IconButton(
             icon: Icon(Icons.logout, color: Colors.white),
@@ -542,10 +663,20 @@ class _ActiveReceptionDashboardState extends State<ActiveReceptionDashboard> {
                             child: ListTile(
                               leading: Icon(Icons.directions_car, color: Colors.blue[300]),
                               title: Text(vehicle['vehicleNumber'], style: TextStyle(color: Colors.white)),
-                              subtitle: Text(
-                                'Start Time: ${vehicle['startTime']}',
-                                style: TextStyle(color: Colors.grey[400]),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Start Time: ${vehicle['startTime']}',
+                                    style: TextStyle(color: Colors.grey[400]),
+                                  ),
+                                  Text(
+                                    'Started By: ${vehicle['startUserName']}',
+                                    style: TextStyle(color: Colors.grey[400]),
+                                  ),
+                                ],
                               ),
+                              isThreeLine: true,
                             ),
                           );
                         },
@@ -579,10 +710,28 @@ class _ActiveReceptionDashboardState extends State<ActiveReceptionDashboard> {
                             child: ListTile(
                               leading: Icon(Icons.check_circle, color: Colors.green[300]),
                               title: Text(vehicle['vehicleNumber'], style: TextStyle(color: Colors.white)),
-                              subtitle: Text(
-                                'Start: ${vehicle['startTime']}\nEnd: ${vehicle['endTime']}',
-                                style: TextStyle(color: Colors.grey[400]),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Start: ${vehicle['startTime']}',
+                                    style: TextStyle(color: Colors.grey[400]),
+                                  ),
+                                  Text(
+                                    'Started By: ${vehicle['startUserName']}',
+                                    style: TextStyle(color: Colors.grey[400]),
+                                  ),
+                                  Text(
+                                    'End: ${vehicle['endTime']}',
+                                    style: TextStyle(color: Colors.grey[400]),
+                                  ),
+                                  Text(
+                                    'Ended By: ${vehicle['endUserName']}',
+                                    style: TextStyle(color: Colors.grey[400]),
+                                  ),
+                                ],
                               ),
+                              isThreeLine: true,
                             ),
                           );
                         },

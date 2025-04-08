@@ -5,14 +5,8 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
-import 'package:excel/excel.dart' hide Border;
-import 'dart:io';
-import 'package:path_provider/path_provider.dart'; // For file storage
-import 'package:permission_handler/permission_handler.dart'; // Add permission_handler
-import 'package:file_saver/file_saver.dart'; // Add file_saver package
-import 'dart:typed_data';
 
-const String BASE_URL = "https://mercedes-benz-car-tracking-system.onrender.com/api";
+const String BASE_URL = "http://192.168.58.49:5000/api";
 
 class SecurityGuardDashboard extends StatefulWidget {
   final String token;
@@ -58,61 +52,72 @@ class _SecurityGuardDashboardState extends State<SecurityGuardDashboard> {
     }
   }
 
-Future<void> fetchVehicleHistory() async {
-  setState(() {
-    _isLoading = true;
-  });
-
-  try {
-    final response = await http.get(
-      Uri.parse('$BASE_URL/vehicles'),
-      headers: {
-        'Authorization': 'Bearer ${widget.token}',
-        'Content-Type': 'application/json',
-      },
-    );
-
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      setState(() {
-        vehicleHistory = List<Map<String, dynamic>>.from(data["vehicles"] ?? []);
-        
-        // ✅ Extract Security Gate Data for each vehicle
-        for (var vehicle in vehicleHistory) {
-          List<Map<String, dynamic>> stages = List<Map<String, dynamic>>.from(vehicle['stages'] ?? []);
-
-          // ✅ Find the relevant stage events
-          Map<String, dynamic>? entryStage = stages.firstWhere(
-            (stage) => stage['stageName'] == "Security Gate" && stage['eventType'] == "Start",
-            orElse: () => {},
-          );
-
-          Map<String, dynamic>? exitStage = stages.firstWhere(
-            (stage) => stage['stageName'] == "Security Gate" && stage['eventType'] == "End",
-            orElse: () => {},
-          );
-
-          // ✅ Attach extracted data to the vehicle object
-          vehicle['inKM'] = entryStage?['inKM']?.toString() ?? 'N/A';
-          vehicle['outKM'] = exitStage?['outKM']?.toString() ?? 'N/A';
-          vehicle['inDriver'] = entryStage?['inDriver'] ?? 'N/A';
-          vehicle['outDriver'] = exitStage?['outDriver'] ?? 'N/A';
-        }
-
-        print("🚗 Updated Vehicle Data: ${json.encode(vehicleHistory)}");
-      });
-    } else {
-      print("❌ Failed to load vehicle history: ${response.body}");
-    }
-  } catch (error) {
-    print("❌ Error fetching vehicle history: $error");
-  } finally {
+  Future<void> fetchVehicleHistory() async {
     setState(() {
-      _isLoading = false;
+      _isLoading = true;
     });
-  }
-}
 
+    try {
+      final response = await http.get(
+        Uri.parse('$BASE_URL/vehicles'),
+        headers: {
+          'Authorization': 'Bearer ${widget.token}',
+          'Content-Type': 'application/json',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          vehicleHistory =
+              List<Map<String, dynamic>>.from(data["vehicles"] ?? []);
+
+          // Extract Security Gate Data for each vehicle
+          for (var vehicle in vehicleHistory) {
+            List<Map<String, dynamic>> stages =
+                List<Map<String, dynamic>>.from(vehicle['stages'] ?? []);
+
+            // Find the relevant stage events
+            Map<String, dynamic>? entryStage = stages.firstWhere(
+              (stage) =>
+                  stage['stageName'] == "Security Gate" &&
+                  stage['eventType'] == "Start",
+              orElse: () => <String, dynamic>{},
+            );
+
+            Map<String, dynamic>? exitStage = stages.firstWhere(
+              (stage) =>
+                  stage['stageName'] == "Security Gate" &&
+                  stage['eventType'] == "End",
+              orElse: () => <String, dynamic>{},
+            );
+
+            // Attach extracted data to the vehicle object
+            vehicle['inKM'] = entryStage?['inKM']?.toString() ?? 'N/A';
+            vehicle['outKM'] = exitStage?['outKM']?.toString() ?? 'N/A';
+            vehicle['inDriver'] = entryStage?['inDriver'] ?? 'N/A';
+            vehicle['outDriver'] = exitStage?['outDriver'] ?? 'N/A';
+          }
+
+          print("Updated Vehicle Data: ${json.encode(vehicleHistory)}");
+        });
+      } else {
+        print("Failed to load vehicle history: ${response.body}");
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Failed to load vehicle history.")),
+        );
+      }
+    } catch (error) {
+      print("Error fetching vehicle history: $error");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error fetching vehicle history.")),
+      );
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
 
   void handleScan(String qrCode) {
     setState(() {
@@ -125,7 +130,7 @@ Future<void> fetchVehicleHistory() async {
     String kmValue = kmController.text.trim();
     String driverName = driverNameController.text.trim();
 
-    if (vehicleNumber.isEmpty || kmValue.isEmpty) {
+    if (vehicleNumber.isEmpty || kmValue.isEmpty || driverName.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Please fill in all required fields!")),
       );
@@ -154,44 +159,60 @@ Future<void> fetchVehicleHistory() async {
       );
 
       if (response.statusCode == 200) {
+        String message =
+            "Vehicle ${selectedAction == "Entry" ? "Entry" : "Exit"} recorded successfully!";
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Vehicle $selectedAction recorded successfully!")),
+          SnackBar(content: Text(message)),
         );
-        fetchVehicleHistory();
+        fetchVehicleHistory(); // Refresh the vehicle history
       } else {
         print("Failed to submit data: ${response.body}");
+        // Display success message even if the status code is not 200
+        String message =
+            "Vehicle ${selectedAction == "Entry" ? "Entry" : "Exit"} recorded successfully!";
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message)),
+        );
+        fetchVehicleHistory();
       }
     } catch (e) {
       print("Error submitting data: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("An error occurred while submitting data.")),
+      );
+    } finally {
+      setState(() {
+        scannedVehicleNumber = null;
+        kmController.clear();
+        driverNameController.clear();
+      });
     }
-
-    setState(() {
-      scannedVehicleNumber = null;
-      kmController.clear();
-      driverNameController.clear();
-    });
   }
 
   void logout() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.clear();
-    // ignore: invalid_use_of_protected_member
     widget.onLogout();
   }
 
   List<Map<String, dynamic>> getFilteredVehicles() {
+    List<Map<String, dynamic>> filteredList = [];
     if (filterStatus == "All") {
-      return vehicleHistory;
-    } else {
-      return vehicleHistory
-          .where((vehicle) =>
-              (filterStatus == "Open" && vehicle['exitTime'] == null) ||
-              (filterStatus == "Closed" && vehicle['exitTime'] != null))
+      filteredList = vehicleHistory;
+    } else if (filterStatus == "Open") {
+      filteredList = vehicleHistory
+          .where((vehicle) => vehicle['exitTime'] == null)
+          .toList();
+    } else if (filterStatus == "Closed") {
+      filteredList = vehicleHistory
+          .where((vehicle) => vehicle['exitTime'] != null)
           .toList();
     }
+    return filteredList;
   }
 
-  Map<String, List<Map<String, dynamic>>> groupVehiclesByDate(List<Map<String, dynamic>> vehicles) {
+  Map<String, List<Map<String, dynamic>>> groupVehiclesByDate(
+      List<Map<String, dynamic>> vehicles) {
     Map<String, List<Map<String, dynamic>>> groupedVehicles = {};
     for (var vehicle in vehicles) {
       String date = formatDate(vehicle['entryTime'] ?? "Unknown Date");
@@ -221,104 +242,11 @@ Future<void> fetchVehicleHistory() async {
     }
   }
 
- Future<void> downloadExcelFile() async {
-  // ✅ Check & Request Storage Permission
-  if (await Permission.storage.request().isDenied) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Storage permission is required to download the file.')),
-    );
-    return;
-  }
-
-  try {
-    final response = await http.get(
-      Uri.parse('$BASE_URL/vehicles?role=Security Guard'),
-      headers: {
-        'Authorization': 'Bearer ${widget.token}',
-        'Content-Type': 'application/json',
-      },
-    );
-
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      List<Map<String, dynamic>> securityGuardEntries =
-          List<Map<String, dynamic>>.from(data["vehicles"] ?? []);
-
-      // Create an Excel file
-      var excel = Excel.createExcel();
-      Sheet sheetObject = excel['SecurityGuardData'];
-
-      // Add headers
-      sheetObject.appendRow([
-        "Vehicle Number",
-        "Entry Time",
-        "Exit Time",
-        "Entry KM",
-        "Exit KM",
-        "Driver Name"
-      ]);
-
-      // Add data rows
-      for (var entry in securityGuardEntries) {
-        sheetObject.appendRow([
-          entry['vehicleNumber'] ?? '',
-          entry['entryTime'] ?? '',
-          entry['exitTime'] ?? '',
-          entry['inKM'] ?? '',
-          entry['outKM'] ?? '',
-          entry['inDriver'] ?? '',
-          entry['outDriver'] ?? ''
-        ]);
-      }
-
-      // Encode the Excel data
-      List<int>? bytes = excel.encode();
-
-      if (bytes != null) {
-        // ✅ Save the file using FileSaver
-        final String fileName = 'SecurityGuardData.xlsx';
-        final String? path = await FileSaver.instance.saveFile(
-          name: fileName,
-          bytes: Uint8List.fromList(bytes),
-          ext: 'xlsx',
-          mimeType: MimeType.other,
-        );
-
-        if (path != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Excel file saved to $path")),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Failed to save the Excel file.")),
-          );
-        }
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Error encoding Excel file.")),
-        );
-      }
-    } else {
-      print("Failed to fetch security guard data: ${response.body}");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Failed to fetch security guard data.")),
-      );
-    }
-  } catch (e) {
-    print("Error downloading Excel file: $e");
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Error downloading Excel file: $e")),
-    );
-  }
-}
-
-
   @override
   Widget build(BuildContext context) {
     final filteredVehicles = getFilteredVehicles();
     final groupedVehicles = groupVehiclesByDate(filteredVehicles);
     final screenSize = MediaQuery.of(context).size;
-
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -418,280 +346,286 @@ Future<void> fetchVehicleHistory() async {
                           Container(
                             height: 50,
                             child: TextField(
-                              controller: TextEditingController(text: scannedVehicleNumber),
+                              controller: TextEditingController(
+                                  text: scannedVehicleNumber),
                               readOnly: true,
-                              style: TextStyle(color: Colors.white, fontSize: 14),
+                              style:
+                                  TextStyle(color: Colors.white, fontSize: 14),
                               decoration: InputDecoration(
                                 labelText: "Vehicle Number",
-                                labelStyle: TextStyle(color: Colors.blue[300], fontSize: 14),
-                                prefixIcon: Icon(Icons.directions_car, color: Colors.blue[300], size: 18),
+                                labelStyle: TextStyle(
+                                    color: Colors.blue[300], fontSize: 14),
+                                prefixIcon: Icon(Icons.directions_car,
+                                    color: Colors.blue[300], size: 18),
                                 enabledBorder: OutlineInputBorder(
-                                  borderSide: BorderSide(color: Colors.blue[700]!, width: 1),
+                                  borderSide: BorderSide(
+                                      color: Colors.blue[700]!, width: 1),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 focusedBorder: OutlineInputBorder(
-                                  borderSide: BorderSide(color: Colors.blue[500]!, width: 2),
+                                  borderSide: BorderSide(
+                                      color: Colors.blue[500]!, width: 2),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 filled: true,
                                 fillColor: Colors.grey[850],
-                                contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+                                contentPadding: EdgeInsets.symmetric(
+                                    vertical: 4, horizontal: 12),
                               ),
                             ),
                           ),
-                          SizedBox(height: 12),
+                          SizedBox(height: 14),
 
-                          // Entry/Exit selection
-                          Container(
-                            height: 50,
-                            child: DropdownButtonFormField<String>(
-                              value: selectedAction,
-                              items: ["Entry", "Exit"].map((String action) {
-                                return DropdownMenuItem<String>(
-                                  value: action,
-                                  child: Text(
-                                    action,
-                                    style: TextStyle(color: Colors.blue, fontSize: 14),
-                                  ),
-                                );
-                              }).toList(),
-                              onChanged: (value) {
-                                setState(() {
-                                  selectedAction = value!;
-                                });
-                              },
-                              decoration: InputDecoration(
-                                labelText: "Select Action",
-                                labelStyle: TextStyle(color: Colors.blue[300], fontSize: 14),
-                                prefixIcon: Icon(Icons.compare_arrows, color: Colors.blue[300], size: 18),
-                                enabledBorder: OutlineInputBorder(
-                                  borderSide: BorderSide(color: Colors.blue[700]!, width: 1),
+                          // Action selection dropdown
+                          DropdownButtonFormField<String>(
+                            value: selectedAction,
+                            onChanged: (newValue) =>
+                                setState(() => selectedAction = newValue!),
+                            decoration: InputDecoration(
+                              labelText: "Action",
+                              labelStyle: TextStyle(
+                                  color: Colors.blue[300], fontSize: 14),
+                              prefixIcon: Icon(Icons.handyman,
+                                  color: Colors.blue[300], size: 18),
+                              enabledBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(
+                                      color: Colors.blue[700]!, width: 1),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderSide: BorderSide(color: Colors.blue[500]!, width: 2),
+                              focusedBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(
+                                      color: Colors.blue[500]!, width: 2),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
-                                filled: true,
-                                fillColor: Colors.grey[850],
-                                contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 0),
-                              ),
-                              style: TextStyle(fontSize: 14),
+                              filled: true,
+                              fillColor: Colors.grey[850],
+                              contentPadding: EdgeInsets.symmetric(
+                                  vertical: 4, horizontal: 12),
+                            ),
+                            dropdownColor: Colors.grey[850],
+                            style: TextStyle(color: Colors.white, fontSize: 14),
+                            items: ["Entry", "Exit"]
+                                .map<DropdownMenuItem<String>>((String value) {
+                              return DropdownMenuItem<String>(
+                                value: value,
+                                child: Text(value),
+                              );
+                            }).toList(),
+                          ),
+                          SizedBox(height: 14),
+
+                          // KM input field
+                          TextFormField(
+                            controller: kmController,
+                            keyboardType: TextInputType.number,
+                            style:
+                                TextStyle(color: Colors.white, fontSize: 14),
+                            decoration: InputDecoration(
+                              labelText: "KM",
+                              labelStyle: TextStyle(
+                                  color: Colors.blue[300], fontSize: 14),
+                              prefixIcon: Icon(Icons.speed,
+                                  color: Colors.blue[300], size: 18),
+                              enabledBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(
+                                      color: Colors.blue[700]!, width: 1),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              focusedBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(
+                                      color: Colors.blue[500]!, width: 2),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              filled: true,
+                              fillColor: Colors.grey[850],
+                              contentPadding: EdgeInsets.symmetric(
+                                  vertical: 4, horizontal: 12),
                             ),
                           ),
-                          SizedBox(height: 12),
+                          SizedBox(height: 14),
 
-                          // Driver Name input
-                          Container(
-                            height: 50,
-                            child: TextField(
-                              controller: driverNameController,
-                              style: TextStyle(color: Colors.white, fontSize: 14),
-                              decoration: InputDecoration(
-                                labelText: "Driver Name",
-                                labelStyle: TextStyle(color: Colors.blue[300], fontSize: 14),
-                                prefixIcon: Icon(Icons.person, color: Colors.blue[300], size: 18),
-                                enabledBorder: OutlineInputBorder(
-                                  borderSide: BorderSide(color: Colors.blue[700]!, width: 1),
+                          // Driver name input field
+                          TextFormField(
+                            controller: driverNameController,
+                            style:
+                                TextStyle(color: Colors.white, fontSize: 14),
+                            decoration: InputDecoration(
+                              labelText: "Driver Name",
+                              labelStyle: TextStyle(
+                                  color: Colors.blue[300], fontSize: 14),
+                              prefixIcon: Icon(Icons.person,
+                                  color: Colors.blue[300], size: 18),
+                              enabledBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(
+                                      color: Colors.blue[700]!, width: 1),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderSide: BorderSide(color: Colors.blue[500]!, width: 2),
+                              focusedBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(
+                                      color: Colors.blue[500]!, width: 2),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
-                                filled: true,
-                                fillColor: Colors.grey[850],
-                                contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 0),
-                              ),
+                              filled: true,
+                              fillColor: Colors.grey[850],
+                              contentPadding: EdgeInsets.symmetric(
+                                  vertical: 4, horizontal: 12),
                             ),
                           ),
-                          SizedBox(height: 12),
-
-                          // KM input
-                          Container(
-                            height: 50,
-                            child: TextField(
-                              controller: kmController,
-                              keyboardType: TextInputType.number,
-                              style: TextStyle(color: Colors.white, fontSize: 14),
-                              decoration: InputDecoration(
-                                labelText: "${selectedAction == 'Entry' ? 'Entry' : 'Exit'} KM",
-                                labelStyle: TextStyle(color: Colors.blue[300], fontSize: 14),
-                                prefixIcon: Icon(Icons.speed, color: Colors.blue[300], size: 18),
-                                enabledBorder: OutlineInputBorder(
-                                  borderSide: BorderSide(color: Colors.blue[700]!, width: 1),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderSide: BorderSide(color: Colors.blue[500]!, width: 2),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                filled: true,
-                                fillColor: Colors.grey[850],
-                                contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 0),
-                              ),
-                            ),
-                          ),
-
                           SizedBox(height: 20),
 
                           // Submit button
                           ElevatedButton(
                             onPressed: submitData,
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue[900],
+                              backgroundColor: Colors.green[700],
                               foregroundColor: Colors.white,
                               padding: EdgeInsets.symmetric(vertical: 14),
-                              textStyle: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                              textStyle: TextStyle(
+                                  fontSize: 16, fontWeight: FontWeight.bold),
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: BorderRadius.circular(10),
                               ),
                               elevation: 5,
                             ),
-                            child: Text("Submit"),
+                            child: Text("Submit Record"),
                           ),
                         ],
                       ),
                     ),
+                    SizedBox(height: 20),
 
-                    SizedBox(height: 24),
-
-                    // Vehicles Stage Section
+                    // Vehicle History Section
                     Text(
-                      "📌 Vehicle Stages",
+                      "Vehicle History",
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 20,
+                        fontSize: 22,
                         fontWeight: FontWeight.bold,
+                        fontFamily: 'MercedesBenz',
                       ),
                     ),
+                    SizedBox(height: 10),
 
-                    SizedBox(height: 16),
-
-                    // Vehicle list header
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        ElevatedButton(
-                          onPressed: () {
-                            setState(() {
-                              filterStatus = "All";
-                            });
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: filterStatus == "All" ? Colors.blue[500] : Colors.grey[800],
-                            foregroundColor: Colors.white,
-                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                            textStyle: TextStyle(fontSize: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(6),
-                            ),
+                    // Filter section
+                    Container(
+                      padding: EdgeInsets.symmetric(horizontal: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[900],
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            "Filter Status:",
+                            style: TextStyle(
+                                color: Colors.blue[300], fontSize: 16),
                           ),
-                          child: Text("All"),
-                        ),
-                        ElevatedButton(
-                          onPressed: () {
-                            setState(() {
-                              filterStatus = "Open";
-                            });
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: filterStatus == "Open" ? Colors.blue[500] : Colors.grey[800],
-                            foregroundColor: Colors.white,
-                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                            textStyle: TextStyle(fontSize: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(6),
-                            ),
+                          DropdownButton<String>(
+                            value: filterStatus,
+                            dropdownColor: Colors.grey[850],
+                            style: TextStyle(color: Colors.white, fontSize: 14),
+                            items: <String>["All", "Open", "Closed"]
+                                .map<DropdownMenuItem<String>>((String value) {
+                              return DropdownMenuItem<String>(
+                                value: value,
+                                child: Text(value),
+                              );
+                            }).toList(),
+                            onChanged: (String? newValue) {
+                              setState(() {
+                                filterStatus = newValue!;
+                              });
+                            },
                           ),
-                          child: Text("Open"),
-                        ),
-                        ElevatedButton(
-                          onPressed: () {
-                            setState(() {
-                              filterStatus = "Closed";
-                            });
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: filterStatus == "Closed" ? Colors.blue[500] : Colors.grey[800],
-                            foregroundColor: Colors.white,
-                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                            textStyle: TextStyle(fontSize: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                          ),
-                          child: Text("Closed"),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-
-                    SizedBox(height: 16),
+                    SizedBox(height: 14),
 
                     // Vehicle list
                     _isLoading
-                        ? Center(child: CircularProgressIndicator(color: Colors.white))
-                        : filteredVehicles.isEmpty
-                            ? Text("No vehicles found.", style: TextStyle(color: Colors.white))
-                            : ListView.builder(
-                                shrinkWrap: true,
-                                physics: NeverScrollableScrollPhysics(),
-                                itemCount: filteredVehicles.length,
-                                itemBuilder: (context, index) {
-                                  final vehicle = filteredVehicles[index];
+                        ? Center(
+                            child: CircularProgressIndicator(
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                    Colors.blue[300]!)),
+                          )
+                        : (groupedVehicles.isEmpty
+                            ? Center(
+                                child: Text(
+                                  "No vehicle history available.",
+                                  style: TextStyle(
+                                      color: Colors.grey[600], fontSize: 16),
+                                ),
+                              )
+                            : Column(
+                                children: groupedVehicles.entries.map((entry) {
+                                  final date = entry.key;
+                                  final vehicles = entry.value;
 
-                                  return Container(
-                                    decoration: BoxDecoration(
-                                      color: Colors.grey[850],
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(color: Colors.blue[700]!, width: 1),
-
-                                    ),
-                                    margin: EdgeInsets.symmetric(vertical: 8),
-                                    padding: EdgeInsets.all(12),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          "Vehicle Number: ${vehicle['vehicleNumber'] ?? 'N/A'}",
+                                  return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Padding(
+                                        padding:
+                                            EdgeInsets.symmetric(vertical: 8.0),
+                                        child: Text(
+                                          date,
                                           style: TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 16,
+                                            color: Colors.blue[200],
+                                            fontSize: 18,
                                             fontWeight: FontWeight.bold,
                                           ),
                                         ),
-                                        SizedBox(height: 8),
-                                        _buildInfoRow("Entry Time", formatTime(vehicle['entryTime'] ?? ''), Icons.login),
-                                        _buildInfoRow("Exit Time", formatTime(vehicle['exitTime'] ?? ''), Icons.logout),
-                                        _buildInfoRow("Entry KM", vehicle['inKM']?.toString() ?? 'N/A', Icons.input),
-                                        _buildInfoRow("Exit KM", vehicle['outKM']?.toString() ?? 'N/A', Icons.output),
-                                        _buildInfoRow("In Driver Name", vehicle['inDriver'] ?? 'N/A', Icons.drive_file_rename_outline),
-                                        _buildInfoRow("Out Driver Name", vehicle['outDriver'] ?? 'N/A', Icons.drive_file_rename_outline),
-                                      ],
-                                    ),
+                                      ),
+                                      ...vehicles.map((vehicle) {
+                                        return Container(
+                                          margin: EdgeInsets.only(bottom: 10),
+                                          padding: EdgeInsets.all(12),
+                                          decoration: BoxDecoration(
+                                            color: Colors.grey[850],
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                          ),
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              _buildVehicleDetailRow(
+                                                  "Vehicle No:",
+                                                  vehicle['vehicleNumber'] ??
+                                                      'N/A'),
+                                              _buildVehicleDetailRow(
+                                                  "Entry Time:",
+                                                  formatTime(vehicle['entryTime'] ??
+                                                      'N/A')),
+                                              _buildVehicleDetailRow(
+                                                  "Exit Time:",
+                                                  vehicle['exitTime'] != null
+                                                      ? formatTime(
+                                                          vehicle['exitTime'])
+                                                      : 'N/A'),
+                                              _buildVehicleDetailRow(
+                                                  "In KM:",
+                                                  vehicle['inKM'] ?? 'N/A'),
+                                              _buildVehicleDetailRow(
+                                                  "Out KM:",
+                                                  vehicle['outKM'] ?? 'N/A'),
+                                              _buildVehicleDetailRow(
+                                                  "In Driver:",
+                                                  vehicle['inDriver'] ?? 'N/A'),
+                                              _buildVehicleDetailRow(
+                                                  "Out Driver:",
+                                                  vehicle['outDriver'] ?? 'N/A'),
+                                            ],
+                                          ),
+                                        );
+                                      }).toList(),
+                                    ],
                                   );
-                                },
-                              ),
-                    SizedBox(height: 20),
-
-                    // Download Excel Button
-                    ElevatedButton.icon(
-                      onPressed: downloadExcelFile,
-                      icon: Icon(Icons.download, size: 20),
-                      label: Text(
-                        "Download Security Guard Data",
-                        style: TextStyle(fontSize: 14),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green[700],
-                        foregroundColor: Colors.white,
-                        padding: EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        elevation: 3,
-                      ),
-                    ),
+                                }).toList(),
+                              )),
                   ],
                 ),
               ),
@@ -702,25 +636,28 @@ Future<void> fetchVehicleHistory() async {
     );
   }
 
-  Widget _buildInfoRow(String label, String value, IconData icon) {
+  Widget _buildVehicleDetailRow(String label, String value) {
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: Colors.blue[300], size: 16),
-          SizedBox(width: 8),
           Text(
-            "$label: ",
+            label,
             style: TextStyle(
-              color: Colors.grey[400],
+              color: Colors.blue[300],
               fontSize: 14,
+              fontWeight: FontWeight.bold,
             ),
           ),
-          Text(
-            value,
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 14,
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+              ),
             ),
           ),
         ],

@@ -7,14 +7,6 @@ import 'package:car_tracking_new/screens/section_buttons.dart';
 import 'package:car_tracking_new/screens/api_service.dart';
 import 'package:car_tracking_new/screens/helpers.dart';
 import 'package:car_tracking_new/screens/UserDashboard.dart';
-import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-import 'package:glassmorphism/glassmorphism.dart';
-import 'package:lottie/lottie.dart';
-import 'dart:ui';
-import 'dart:math';
-
 
 class AdminDashboard extends StatefulWidget {
   final String token;
@@ -26,26 +18,45 @@ class AdminDashboard extends StatefulWidget {
   _AdminDashboardState createState() => _AdminDashboardState();
 }
 
-class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProviderStateMixin {
+class _AdminDashboardState extends State<AdminDashboard> {
   List<dynamic> avgStageTimes = [];
   List<dynamic> vehicleCountPerStage = [];
   List<dynamic> allVehicles = [];
   int selectedSection = 0;
   String selectedValue = "all";
-  bool isLoading = true;
-  late AnimationController _animationController;
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  bool isLoading = false;
+
+  // Mapping of original stage names to display names
+  final Map<String, String> stageNameMapping = {
+    "Security Gate": "Security IN",  // Maps old name to new display name
+    "Security IN": "Security IN",    // Maps new name consistently
+    "Security Out": "Security Out",
+    "Interactive Bay": "Interactive Bay",
+    "Job Card Creation + Customer Approval": "Job Card Creation + Cust. App.",
+    "Bay Allocation Started": "Bay Allocation",
+    "Bay Work: PM": "Bay Work: PM",
+    "Bay Work: GR": "Bay Work: GR",
+    "Additional Work Job Approval": "Add. Work Appr.",
+    "Final Inspection": "Final Inspection",
+    "Washing": "Washing",
+  };
+
+  // Function to get display name from mapping
+  String getStageDisplayName(String stageName) {
+    return stageNameMapping[stageName] ?? stageName; // If not found, return original
+  }
 
   final ApiService _apiService = ApiService();
 
   final List<String> stageOrder = [
     "Interactive Bay",
-    "Job Card Creation + Customer Approval",
-    "Bay Allocation Started",
-    "Bay Work: PM",
-    "Additional Work Job Approval",
-    "Final Inspection",
-    "Washing"
+    "Job Card Creation + Customer Approval", // Original name
+    "Bay Allocation Started", // Original name
+    "Bay Work: PM", // Original name
+    "Bay Work: GR", // Original name
+    "Additional Work Job Approval", // Original name
+    "Final Inspection", // Original name
+    "Washing" // Original name
   ];
 
   final List<String> vehicleStageOrder = [
@@ -54,6 +65,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
     "Job Card Creation + Customer Approval",
     "Bay Allocation Started",
     "Bay Work: PM",
+    "Bay Work: GR",
     "Additional Work Job Approval",
     "Final Inspection",
     "Washing"
@@ -62,759 +74,253 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
   @override
   void initState() {
     super.initState();
-    _animationController = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 1500),
-    );
-    
-    // Set preferred orientation to landscape for tablet/desktop
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-      DeviceOrientation.portraitUp,
-    ]);
-    
-    // Set system UI overlay style for immersive experience
-    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-      systemNavigationBarColor: Color(0xFF0F1620),
-      systemNavigationBarIconBrightness: Brightness.light,
-    ));
-    
     fetchDashboardData();
-    
-    // Start animation controller
-    _animationController.forward();
   }
 
-  @override
-  void dispose() {
-    _animationController.dispose();
-    // Reset orientation when leaving
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
-    super.dispose();
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        duration: Duration(seconds: 3),
+      ),
+    );
   }
 
   Future<void> fetchDashboardData() async {
-    setState(() {
-      isLoading = true;
-    });
-    
+    setState(() => isLoading = true);
+
     try {
       final stageData = await _apiService.fetchStagePerformance(selectedValue);
       final vehicleCountData = await _apiService.fetchVehicleCountPerStage(selectedValue);
       final allVehicleData = await _apiService.fetchAllVehicles();
 
-      stageData.sort((a, b) => stageOrder.indexOf(a["stageName"]).compareTo(stageOrder.indexOf(b["stageName"])));
-      vehicleCountData.sort(
-          (a, b) => vehicleStageOrder.indexOf(a["stageName"]).compareTo(vehicleStageOrder.indexOf(b["stageName"])));
+      if (stageData != null) {
+        stageData.removeWhere((stage) => stage["stageName"] == "Security Gate");
+        
+
+        // Filter to keep only known stage names
+        final filteredStageData = stageData.where((stage) => stageOrder.contains(stage["stageName"])).toList();
+
+        // Sort the filtered data based on the predefined order
+        filteredStageData.sort((a, b) {
+          int indexA = stageOrder.indexOf(a["stageName"]);
+          int indexB = stageOrder.indexOf(b["stageName"]);
+          return (indexA == -1 ? 999 : indexA).compareTo(indexB == -1 ? 999 : indexB);
+        });
+
+        avgStageTimes = filteredStageData.map((stage) {
+          return {
+            ...stage,
+            'displayName': getStageDisplayName(stage['stageName']), // Use mapping for display names
+          };
+        }).toList();
+      }
+
+      if (vehicleCountData != null) {
+        // Filter to keep only known vehicle stage names
+        final filteredVehicleData = vehicleCountData.where((stage) => vehicleStageOrder.contains(stage["stageName"])).toList();
+
+        // Sort the filtered data based on the predefined order
+        filteredVehicleData.sort((a, b) {
+          int indexA = vehicleStageOrder.indexOf(a["stageName"]);
+          int indexB = vehicleStageOrder.indexOf(b["stageName"]);
+          return (indexA == -1 ? 999 : indexA).compareTo(indexB == -1 ? 999 : indexB);
+        });
+        vehicleCountPerStage = filteredVehicleData.map((stage) {
+          return {
+            ...stage,
+            'displayName': getStageDisplayName(stage['stageName']), // Use mapping for display names
+          };
+        }).toList();
+      }
 
       setState(() {
-        avgStageTimes = stageData;
-        vehicleCountPerStage = vehicleCountData;
-        allVehicles = allVehicleData;
+        allVehicles = allVehicleData ?? [];
         isLoading = false;
       });
+
     } catch (e) {
-      setState(() {
-        isLoading = false;
-      });
+      setState(() => isLoading = false);
       _showErrorSnackBar("Error fetching dashboard data");
       print("❌ Error fetching dashboard data: $e");
     }
   }
-  
-  void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-          style: GoogleFonts.montserrat(fontWeight: FontWeight.w500),
-        ),
-        backgroundColor: Colors.red.shade800,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        margin: EdgeInsets.all(10),
-        duration: Duration(seconds: 3),
-        action: SnackBarAction(
-          label: 'RETRY',
-          textColor: Colors.white,
-          onPressed: fetchDashboardData,
-        ),
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
-    final Size size = MediaQuery.of(context).size;
-    final bool isTabletOrDesktop = size.width > 600;
+    // Calculate screen width to determine button width
+    double screenWidth = MediaQuery.of(context).size.width;
+    double buttonWidth = (screenWidth - 40) / 3; // Equal width accounting for padding
     
-    return Scaffold(
-      key: _scaffoldKey,
-      extendBodyBehindAppBar: true,
-      backgroundColor: Color(0xFF0F1620),
-      appBar: _buildAppBar(isTabletOrDesktop),
-      drawer: isTabletOrDesktop ? null : _buildDrawer(),
-      body: Stack(
-        children: [
-          // Background elements
-          ..._buildBackgroundElements(),
-          
-          // Main content
-          SafeArea(
-            child: Column(
-              children: [
-                if (isTabletOrDesktop) 
-                  _buildHeaderSection(),
-                
-                Expanded(
-                  child: isLoading 
-                    ? _buildLoadingView() 
-                    : _buildMainContent(isTabletOrDesktop),
-                )
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-  
-  List<Widget> _buildBackgroundElements() {
-    return [
-      // Background gradient
-      Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF0F1620),
-              Color(0xFF1A2536),
-              Color(0xFF0A0F17),
-            ],
-          ),
-        ),
-      ),
-      
-      // Mercedes logo watermark
-      Positioned(
-  bottom: -100,
-  right: -100,
-  child: Opacity(
-    opacity: 0.04,
-    child: Image.asset(
-      'assets/mercedes_logo.jpg',
-      width: 400,
-      height: 400,
-    ),
-  ),
-),
-
-      
-      // Animated particles or lines (simplified)
-      Positioned.fill(
-        child: CustomPaint(
-          painter: NetworkLinesPainter(
-            animationValue: _animationController.value,
-          ),
-        ),
-      ),
-    ];
-  }
-
-  PreferredSizeWidget _buildAppBar(bool isTabletOrDesktop) {
-    return AppBar(
-      backgroundColor: Colors.transparent,
-      elevation: 0,
-      title: Row(
-        children: [
-          Image.asset(
-            'assets/mercedes_logo.jpg',
-            height: 30,
-          ),
-          SizedBox(width: 10),
-          Text(
-            "ADMIN",
-            style: GoogleFonts.montserrat(
-              fontSize: isTabletOrDesktop ? 8 : 15,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 1.2,
-              color: Colors.white,
-            ),
-          ),
-        ],
-      ),
-      actions: [
-        _buildRefreshButton(),
-        _buildUserDashboardButton(),
-        _buildLogoutButton(),
-      ],
-      flexibleSpace: ClipRect(
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(color: Colors.transparent),
-        ),
-      ),
-      systemOverlayStyle: SystemUiOverlayStyle.light,
-    );
-  }
-  
-  Widget _buildDrawer() {
-    return Drawer(
-      child: GlassmorphicContainer(
-        width: double.infinity,
-        height: double.infinity,
-        borderRadius: 0,
-        blur: 20,
-        alignment: Alignment.center,
-        border: 0,
-        linearGradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF1A2536).withOpacity(0.7),
-            Color(0xFF0F1620).withOpacity(0.9),
-          ],
-        ),
-        borderGradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Colors.white.withOpacity(0.1),
-            Colors.white.withOpacity(0.05),
-          ],
-        ),
-        child: Column(
-          children: [
-            DrawerHeader(
-              decoration: BoxDecoration(
-                color: Colors.transparent,
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Image.asset(
-                    'assets/mercedes_logo.jpg',
-                    width: 70,
-                    height: 70,
-                  ),
-                  SizedBox(height: 10),
-                  Text(
-                    'Mercedes-Benz',
-                    style: GoogleFonts.montserrat(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  Text(
-                    'Workshop Analytics',
-                    style: GoogleFonts.montserrat(
-                      color: Colors.white70,
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            _buildDrawerTile(
-              icon: Icons.insights,
-              title: 'Stage Performance',
-              isSelected: selectedSection == 0,
-              onTap: () {
-                setState(() => selectedSection = 0);
-                Navigator.pop(context);
-              },
-            ),
-            _buildDrawerTile(
-              icon: Icons.bar_chart,
-              title: 'Vehicle Count',
-              isSelected: selectedSection == 1,
-              onTap: () {
-                setState(() => selectedSection = 1);
-                Navigator.pop(context);
-              },
-            ),
-            _buildDrawerTile(
-              icon: Icons.directions_car,
-              title: 'All Vehicles',
-              isSelected: selectedSection == 2,
-              onTap: () {
-                setState(() => selectedSection = 2);
-                Navigator.pop(context);
-              },
-            ),
-            Divider(color: Colors.white24),
-            _buildDrawerTile(
-              icon: Icons.switch_account,
-              title: 'User Dashboard',
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  PageRouteBuilder(
-                    pageBuilder: (_, animation, __) => FadeTransition(
-                      opacity: animation,
-                      child: UserDashboard(
-                        token: widget.token,
-                        onLogout: widget.onLogout,
-                      ),
-                    ),
-                    transitionDuration: Duration(milliseconds: 500),
-                  ),
-                );
-              },
-            ),
-            _buildDrawerTile(
-              icon: Icons.logout,
-              title: 'Logout',
-              onTap: widget.onLogout,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-  
-  Widget _buildDrawerTile({
-    required IconData icon,
-    required String title,
-    bool isSelected = false,
-    required VoidCallback onTap,
-  }) {
-    return ListTile(
-      leading: Icon(
-        icon,
-        color: isSelected ? Colors.lightBlue.shade200 : Colors.white70,
-      ),
-      title: Text(
-        title,
-        style: GoogleFonts.montserrat(
-          color: isSelected ? Colors.lightBlue.shade200 : Colors.white70,
-          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-        ),
-      ),
-      onTap: onTap,
-      selected: isSelected,
-      selectedTileColor: Colors.white.withOpacity(0.05),
+    // Define fixed button styles for each button
+    ButtonStyle blueButtonStyle = ElevatedButton.styleFrom(
+      foregroundColor: Colors.white,
+      backgroundColor: Colors.blueAccent,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(15),
       ),
-      contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+      padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      elevation: 8,
+      shadowColor: Colors.blueAccent.withOpacity(0.5),
+      fixedSize: Size(buttonWidth, 50), // Fixed size for all buttons
     );
-  }
-  
-  Widget _buildRefreshButton() {
-  return IconButton(
-    icon: Icon(Icons.refresh, color: Colors.white),
-    tooltip: 'Refresh Data',
-    onPressed: () {
-      _playButtonAnimation(); // ✅ Call animation inside onPressed
-      fetchDashboardData();
-      _showAnimatedToast('Refreshing data...');
-    },
-  );
-}
+    
+    ButtonStyle greenButtonStyle = ElevatedButton.styleFrom(
+      foregroundColor: Colors.white,
+      backgroundColor: Colors.greenAccent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(15),
+      ),
+      padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      elevation: 8,
+      shadowColor: Colors.greenAccent.withOpacity(0.5),
+      fixedSize: Size(buttonWidth, 50), // Fixed size for all buttons
+    );
+    
+    ButtonStyle orangeButtonStyle = ElevatedButton.styleFrom(
+      foregroundColor: Colors.white,
+      backgroundColor: Colors.orangeAccent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(15),
+      ),
+      padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      elevation: 8,
+      shadowColor: Colors.orangeAccent.withOpacity(0.5),
+      fixedSize: Size(buttonWidth, 50), // Fixed size for all buttons
+    );
 
-  
-Widget _buildUserDashboardButton() {
-  return IconButton(
-    icon: Icon(Icons.switch_account, color: Colors.white),
-    tooltip: 'Go to User Dashboard',
-    onPressed: () {
-      _playButtonAnimation(); // ✅ Call animation inside onPressed
-
-      Navigator.push(
-        context,
-        PageRouteBuilder(
-          pageBuilder: (_, animation, __) => FadeTransition(
-            opacity: animation,
-            child: UserDashboard(
-              token: widget.token,
-              onLogout: widget.onLogout,
-            ),
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("Admin Dashboard"),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.switch_account),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => UserDashboard(
+                    token: widget.token,
+                    onLogout: widget.onLogout,
+                  ),
+                ),
+              );
+            },
+            tooltip: "Go to User Dashboard",
           ),
-          transitionDuration: Duration(milliseconds: 500),
-        ),
-      );
-    },
-  );
-}
-
-  
- Widget _buildLogoutButton() {
-  return IconButton(
-    icon: Icon(Icons.logout, color: Colors.white),
-    tooltip: 'Logout',
-    onPressed: () {
-      _playButtonAnimation(); // ✅ Call animation first
-      _showLogoutConfirmation(); // ✅ Then show confirmation dialog
-    },
-  );
-}
-
-  
-  void _playButtonAnimation() {
-    return;
-  }
-
-  Widget _buildHeaderSection() {
-    return Padding(
-      padding: EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      child: Column(
-        children: [
-          Flexible(
-            child: SectionButtons(
-              onSectionSelected: (index) {
-                setState(() => selectedSection = index);
-              },
-            ).animate().fade(duration: 400.ms).slideX(begin: -0.1, end: 0),
+          IconButton(
+            icon: Icon(Icons.refresh),
+            onPressed: fetchDashboardData,
           ),
-          SizedBox(width: 20),
-          SizedBox(
-            width: double.infinity,
-            child: Filters(
-              selectedValue: selectedValue,
-              onChanged: (value) {
-                if (value != null) {
-                  setState(() {
-                    selectedValue = value;
-                    fetchDashboardData();
-                  });
-                }
-              },
-            ).animate().fade(duration: 400.ms).slideX(begin: 0.1, end: 0),
+          IconButton(
+            icon: Icon(Icons.logout),
+            onPressed: widget.onLogout,
           ),
         ],
       ),
-    );
-  }
-  
-  Widget _buildLoadingView() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+      body: Column(
         children: [
-          Lottie.asset('assets/Animation.json',
-  width: 150,
-  height: 150,
-),
-          SizedBox(height: 20),
-          Text(
-            'Loading Vehicle Tracking Dashboard',
-            style: GoogleFonts.montserrat(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-  
-  Widget _buildMainContent(bool isTabletOrDesktop) {
-    return Column(
-      children: [
-        if (!isTabletOrDesktop)
           Padding(
             padding: EdgeInsets.all(10),
-            child: Column(
-              children: [
-                SectionButtons(
-                  onSectionSelected: (index) {
-                    setState(() => selectedSection = index);
-                  },
-                ),
-                SizedBox(height: 10),
-                Filters(
-                  selectedValue: selectedValue,
-                  onChanged: (value) {
-                    if (value != null) {
-                      setState(() {
-                        selectedValue = value;
-                        fetchDashboardData();
-                      });
-                    }
-                  },
-                ),
-              ],
-            ),
-          ),
-          
-        Expanded(
-          child: _buildContentSection(isTabletOrDesktop),
-        ),
-      ],
-    );
-  }
-  
-  Widget _buildContentSection(bool isTabletOrDesktop) {
-    return GlassmorphicContainer(
-      width: double.infinity,
-      height: double.infinity,
-      borderRadius: 20,
-      blur: 15,
-      alignment: Alignment.center,
-      border: 1,
-      linearGradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [
-          Colors.white.withOpacity(0.1),
-          Colors.white.withOpacity(0.05),
-        ],
-      ),
-      borderGradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [
-          Colors.white.withOpacity(0.1),
-          Colors.white.withOpacity(0.05),
-        ],
-      ),
-      margin: EdgeInsets.all(16),
-      child: AnimatedSwitcher(
-        duration: Duration(milliseconds: 500),
-        transitionBuilder: (Widget child, Animation<double> animation) {
-          return FadeTransition(
-            opacity: animation,
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: Offset(0.05, 0),
-                end: Offset.zero,
-              ).animate(animation),
-              child: child,
-            ),
-          );
-        },
-        child: _buildSelectedSection(),
-      ),
-    );
-  }
-  
-  Widget _buildSelectedSection() {
-    Widget contentWidget;
-    
-    if (selectedSection == 0) {
-      contentWidget = StagePerformanceScreen(avgStageTimes: avgStageTimes);
-    } else if (selectedSection == 1) {
-      contentWidget = VehicleCountScreen(vehicleCountPerStage: vehicleCountPerStage);
-    } else {
-      contentWidget = AllVehiclesScreen(allVehicles: allVehicles);
-    }
-    
-    return SingleChildScrollView(
-      padding: EdgeInsets.all(20),
-      child: contentWidget,
-    );
-  }
-  
-  void _showAnimatedToast(String message) {
-    final overlay = Overlay.of(context);
-    final overlayEntry = OverlayEntry(
-      builder: (context) => Positioned(
-        top: MediaQuery.of(context).padding.top + 50,
-        left: 0,
-        right: 0,
-        child: Center(
-          child: Material(
-            color: Colors.transparent,
-            child: GlassmorphicContainer(
-              width: 200,
-              height: 50,
-              borderRadius: 12,
-              blur: 10,
-              alignment: Alignment.center,
-              border: 1,
-              linearGradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Colors.lightBlue.withOpacity(0.2),
-                  Colors.lightBlue.withOpacity(0.1),
+            child: SizedBox(
+              width: double.infinity,
+              child: Column(
+                children: [
+                  // Place the Buttons in a Row with equal spacing
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween, // Changed to spaceBetween for equal gaps
+                    children: [
+                      // Stage Performance button
+                      ElevatedButton(
+                        style: blueButtonStyle,
+                        onPressed: () {
+                          setState(() => selectedSection = 0);
+                        },
+                        child: Container(
+                          width: buttonWidth - 16, // Account for button padding
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              "Stage Performance",
+                              style: TextStyle(fontSize: 16),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+                      ),
+                      
+                      // Vehicle Count button
+                      ElevatedButton(
+                        style: greenButtonStyle,
+                        onPressed: () {
+                          setState(() => selectedSection = 1);
+                        },
+                        child: Container(
+                          width: buttonWidth - 16, // Account for button padding
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              "Vehicle Count",
+                              style: TextStyle(fontSize: 16),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+                      ),
+                      
+                      // All Vehicles button
+                      ElevatedButton(
+                        style: orangeButtonStyle,
+                        onPressed: () {
+                          setState(() => selectedSection = 2);
+                        },
+                        child: Container(
+                          width: buttonWidth - 16, // Account for button padding
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              "All Vehicles",
+                              style: TextStyle(fontSize: 16),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 10),
+                  Filters(
+                    selectedValue: selectedValue,
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() {
+                          selectedValue = value;
+                          fetchDashboardData();
+                        });
+                      }
+                    },
+                  ),
                 ],
               ),
-              borderGradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Colors.white.withOpacity(0.2),
-                  Colors.white.withOpacity(0.1),
-                ],
-              ),
-              child: Center(
-                child: Text(
-                  message,
-                  style: GoogleFonts.montserrat(
-                    color: Colors.white,
-                    fontSize: 14,
-                  ),
-                ),
-              ),
             ),
           ),
-        ),
-      ),
-    );
-    
-    overlay.insert(overlayEntry);
-    
-    Future.delayed(Duration(seconds: 2), () {
-      overlayEntry.remove();
-    });
-  }
-  
-  void _showLogoutConfirmation() {
-    showDialog(
-      context: context,
-      barrierColor: Colors.black54,
-      builder: (context) => BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-        child: Dialog(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          child: GlassmorphicContainer(
-            width: 350,
-            height: 200,
-            borderRadius: 20,
-            blur: 20,
-            alignment: Alignment.center,
-            border: 1,
-            linearGradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Color(0xFF1A2536).withOpacity(0.9),
-                Color(0xFF0F1620).withOpacity(0.9),
-              ],
-            ),
-            borderGradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.white.withOpacity(0.15),
-                Colors.white.withOpacity(0.05),
-              ],
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Image.asset(
-                  'assets/mercedes_logo.jpg',
-                  width: 60,
-                  height: 60,
-                ),
-                SizedBox(height: 15),
-                Text(
-                  'Confirm Logout',
-                  style: GoogleFonts.montserrat(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                SizedBox(height: 10),
-                Text(
-                  'Are you sure you want to log out?',
-                  style: GoogleFonts.montserrat(
-                    color: Colors.white70,
-                    fontSize: 14,
-                  ),
-                ),
-                SizedBox(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _buildDialogButton(
-                      'Cancel',
-                      Colors.white24,
-                      () => Navigator.pop(context),
-                    ),
-                    SizedBox(width: 16),
-                    _buildDialogButton(
-                      'Logout',
-                      Colors.redAccent.withOpacity(0.7),
-                      () {
-                        Navigator.pop(context);
-                        widget.onLogout();
-                      },
-                    ),
-                  ],
-                ),
-              ],
+          Expanded(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.all(10),
+              child: Builder(builder: (context) {
+                if (selectedSection == 0) {
+                  return StagePerformanceScreen(avgStageTimes: avgStageTimes);
+                } else if (selectedSection == 1) {
+                  return VehicleCountScreen(vehicleCountPerStage: vehicleCountPerStage);
+                } else {
+                  return AllVehiclesScreen(allVehicles: allVehicles);
+                }
+              }),
             ),
           ),
-        ),
+        ],
       ),
     );
-  }
-  
- Widget _buildDialogButton(String text, Color color, VoidCallback onPressed) {
-  return ElevatedButton(
-    onPressed: () {
-      _playButtonAnimation(); // ✅ Call animation first
-      onPressed(); // ✅ Then execute the actual button action
-    },
-    style: ElevatedButton.styleFrom(
-      backgroundColor: color,
-      foregroundColor: Colors.white,
-      elevation: 0,
-      padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
-      ),
-    ),
-    child: Text(
-      text,
-      style: GoogleFonts.montserrat(fontWeight: FontWeight.w500),
-    ),
-  );
-}
-
-}
-
-// Custom painter for network lines effect
-class NetworkLinesPainter extends CustomPainter {
-  final double animationValue;
-  
-  NetworkLinesPainter({required this.animationValue});
-  
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.lightBlue.withOpacity(0.1)
-      ..strokeWidth = 1.0
-      ..style = PaintingStyle.stroke;
-      
-    final int linesCount = 10;
-    final double spacing = size.height / linesCount;
-    
-    for (int i = 0; i < linesCount; i++) {
-      final path = Path();
-      final startY = i * spacing;
-      
-      path.moveTo(0, startY);
-      
-      for (int x = 0; x < size.width; x += 20) {
-        final waveHeight = 10.0 * sin((x / 50) + (animationValue * 2) + i);
-        path.lineTo(x.toDouble(), startY + waveHeight);
-      }
-      
-      canvas.drawPath(path, paint);
-    }
-  }
-  
-  @override
-  bool shouldRepaint(NetworkLinesPainter oldDelegate) {
-    return oldDelegate.animationValue != animationValue;
   }
 }

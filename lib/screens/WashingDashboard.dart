@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
 // Define the base URL
-const String baseUrl = 'https://mercedes-benz-car-tracking-system.onrender.com/api';
+const String baseUrl = 'http://192.168.58.49:5000/api';
 
 class WashingDashboard extends StatefulWidget {
   final String token;

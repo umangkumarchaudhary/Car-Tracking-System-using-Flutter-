@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  static const String BASE_URL = "http://192.168.9.167:5000/api";
+  static const String BASE_URL = "https://mercedes-benz-car-tracking-system.onrender.com/api";
 
   Future<List<dynamic>> fetchStagePerformance(String days) async {
     try {
