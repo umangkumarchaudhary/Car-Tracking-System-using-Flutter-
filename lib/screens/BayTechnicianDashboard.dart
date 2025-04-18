@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:http/http.dart' as http;
 
-const String baseUrl = 'http://192.168.58.49:5000/api';
+const String baseUrl = 'https://final-mb-cts.onrender.com/api';
 
 class BayTechnicianDashboard extends StatefulWidget {
   final String token;
@@ -20,17 +20,17 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
   bool _isLoading = false;
   bool _isCameraOpen = false;
   MobileScannerController? _scannerController;
-  final List<String> _workTypes = ['PM', 'GR', 'Body and Paint', 'Diagnosis', 'PMGR', 'PMGR + Body&Paint', 'GR+ Body & Paint', 'PM+ Body and Paint'];
+  final List<String> _workTypes = [
+    'PM', 'GR', 'Body and Paint', 'Diagnosis', 'PMGR', 'PMGR + Body&Paint', 'GR+ Body & Paint', 'PM+ Body and Paint'
+  ];
   final List<String> _bayNumbers = List.generate(15, (index) => (index + 1).toString());
   String? _selectedWorkType;
   String? _selectedBayNumber;
 
-  // Lists to hold work data
   List<dynamic> _workInProgress = [];
   List<dynamic> _workPaused = [];
   List<dynamic> _workEnded = [];
 
-  // State for selected filter
   String _selectedFilter = 'In Progress';
 
   @override
@@ -41,7 +41,7 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
       facing: CameraFacing.back,
       torchEnabled: false,
     );
-    _fetchWorkData(); // Fetch initial data
+    _fetchWorkData();
   }
 
   @override
@@ -51,48 +51,46 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
     super.dispose();
   }
 
-  // Function to fetch work data from the backend
   Future<void> _fetchWorkData() async {
     setState(() => _isLoading = true);
     try {
-      print('Fetching work data...'); // Debug: Indicate fetch start
-
+      print('Fetching work data...'); // Debug: Indicate data fetching start
       final response = await http.get(
-        Uri.parse('$baseUrl/bay-work-status'), // Replace with your actual API endpoint
+        Uri.parse('$baseUrl/bay-work-status'),
         headers: {'Authorization': 'Bearer ${widget.token}'},
       );
-
-      print('Response status code: ${response.statusCode}'); // Debug: Print status code
-      print('Response body: ${response.body}'); // Debug: Print response body
-
+        print('Response Status Code: ${response.statusCode}'); // Debug: Print status code
       if (response.statusCode == 200) {
-        try {
-          final data = json.decode(response.body);
+        print('Decoding response body...'); // Debug: Indicate decoding start
+        final data = json.decode(response.body);
           print('Decoded data: $data'); // Debug: Print decoded data
-          setState(() {
-            _workInProgress = data['inProgress'] ?? [];
-            _workPaused = data['paused'] ?? [];
-            _workEnded = data['ended'] ?? [];
-          });
-        } catch (e) {
-          print('Error decoding JSON: $e'); // Debug: JSON decoding error
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error decoding work data: $e')),
-          );
-        }
+
+        setState(() {
+          _workInProgress = data['inProgress'] ?? [];
+          // Sort _workInProgress to have the latest items at the top
+          _workInProgress.sort((a, b) => 0); // No actual sorting, keeps the original order. If you have a timestamp, sort based on that.
+
+          _workPaused = data['paused'] ?? [];
+          _workEnded = data['ended'] ?? [];
+        });
+        // Debugging: Print the data after setting state
+        print('In Progress: $_workInProgress');
+        print('Paused: $_workPaused');
+        print('Ended: $_workEnded');
       } else {
+        print('Failed to fetch work data: ${response.statusCode}'); // Debug: Print failure message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to fetch work data: ${response.statusCode}')),
         );
       }
     } catch (error) {
-      print('Error fetching work data: $error'); // Debug: Network or other error
+        print('Error fetching work data: $error'); // Debug: Print error message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error fetching work data: $error')),
       );
     } finally {
       setState(() => _isLoading = false);
-      print('Fetching complete.'); // Debug: Indicate fetch completion
+        print('Fetching complete, isLoading: $_isLoading'); // Debug: Print loading state
     }
   }
 
@@ -139,7 +137,7 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
       final data = json.decode(response.body);
       if (data['success'] == true) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Work started successfully')));
-        _fetchWorkData(); // Refresh data
+        _fetchWorkData();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(data['message'] ?? 'Failed to start work')));
       }
@@ -179,7 +177,7 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
       final data = json.decode(response.body);
       if (data['success'] == true) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Work completed successfully')));
-        _fetchWorkData(); // Refresh data
+        _fetchWorkData();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(data['message'] ?? 'Failed to end work')));
       }
@@ -219,7 +217,7 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
       final data = json.decode(response.body);
       if (data['success'] == true) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Work paused')));
-        _fetchWorkData(); // Refresh data
+        _fetchWorkData();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(data['message'] ?? 'Failed to pause work')));
       }
@@ -259,7 +257,7 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
       final data = json.decode(response.body);
       if (data['success'] == true) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Work resumed')));
-        _fetchWorkData(); // Refresh data
+        _fetchWorkData();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(data['message'] ?? 'Failed to resume work')));
       }
@@ -271,15 +269,21 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
   }
 
   List<dynamic> get _filteredWorkList {
+      // Debugging: Print the selected filter
+      print('Selected Filter: $_selectedFilter');
     switch (_selectedFilter) {
       case 'In Progress':
+          print('Returning In Progress: $_workInProgress');
         return _workInProgress;
       case 'Paused':
+          print('Returning Paused: $_workPaused');
         return _workPaused;
       case 'Ended':
+          print('Returning Ended: $_workEnded');
         return _workEnded;
       default:
-        return _workInProgress; // Default to "In Progress"
+          print('Returning Default (In Progress): $_workInProgress');
+        return _workInProgress;
     }
   }
 
@@ -295,7 +299,7 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
+      body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -359,7 +363,6 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
                 setState(() => _selectedBayNumber = value);
               },
             ),
-
             const SizedBox(height: 24),
             Wrap(
               spacing: 10.0,
@@ -424,80 +427,59 @@ class _BayTechnicianDashboardState extends State<BayTechnicianDashboard> {
                 ),
               ],
             ),
-
-            const SizedBox(height: 20),
-
-            // Filter Buttons
+            const SizedBox(height: 24),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                ElevatedButton(
-                  onPressed: () => setState(() => _selectedFilter = 'In Progress'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _selectedFilter == 'In Progress' ? Colors.green : Colors.grey[300],
-                    foregroundColor: _selectedFilter == 'In Progress' ? Colors.white : Colors.black,
-                  ),
-                  child: const Text('In Progress'),
+                ChoiceChip(
+                  label: const Text('In Progress'),
+                  selected: _selectedFilter == 'In Progress',
+                  onSelected: (selected) {
+                    setState(() => _selectedFilter = 'In Progress');
+                  },
                 ),
-                ElevatedButton(
-                  onPressed: () => setState(() => _selectedFilter = 'Paused'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _selectedFilter == 'Paused' ? Colors.orange : Colors.grey[300],
-                    foregroundColor: _selectedFilter == 'Paused' ? Colors.white : Colors.black,
-                  ),
-                  child: const Text('Paused'),
+                const SizedBox(width: 8),
+                ChoiceChip(
+                  label: const Text('Paused'),
+                  selected: _selectedFilter == 'Paused',
+                  onSelected: (selected) {
+                    setState(() => _selectedFilter = 'Paused');
+                  },
                 ),
-                ElevatedButton(
-                  onPressed: () => setState(() => _selectedFilter = 'Ended'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _selectedFilter == 'Ended' ? Colors.red : Colors.grey[300],
-                    foregroundColor: _selectedFilter == 'Ended' ? Colors.white : Colors.black,
-                  ),
-                  child: const Text('Ended'),
+                const SizedBox(width: 8),
+                ChoiceChip(
+                  label: const Text('Ended'),
+                  selected: _selectedFilter == 'Ended',
+                  onSelected: (selected) {
+                    setState(() => _selectedFilter = 'Ended');
+                  },
                 ),
               ],
             ),
-            const SizedBox(height: 20),
-            _filteredWorkList.isNotEmpty
-                ? _buildWorkList(_filteredWorkList)
-                : const Center(child: Text('No data available for the selected filter.')),
+            const SizedBox(height: 16),
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _filteredWorkList.isEmpty
+                      ? const Center(child: Text('No work found for selected filter.'))
+                      : ListView.builder(
+                          itemCount: _filteredWorkList.length,
+                          itemBuilder: (context, index) {
+                            final work = _filteredWorkList[index];
+                            return Card(
+                              margin: const EdgeInsets.symmetric(vertical: 6),
+                              child: ListTile(
+                                title: Text('Vehicle: ${work['vehicleNumber'] ?? ''}'),
+                                subtitle: Text('Work Type: ${work['workType'] ?? ''}\nBay: ${work['bayNumber'] ?? ''}'),
+                                trailing: Text(_selectedFilter),
+                              ),
+                            );
+                          },
+                        ),
+            ),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildWorkList(List<dynamic> workList) {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (workList.isEmpty) {
-      return const Center(child: Text('No data available.'));
-    }
-
-    return ListView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: workList.length,
-      itemBuilder: (context, index) {
-        final work = workList[index];
-        return Card(
-          margin: const EdgeInsets.all(8.0),
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Vehicle Number: ${work['vehicleNumber'] ?? 'N/A'}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                Text('Work Type: ${work['workType'] ?? 'N/A'}'),
-                Text('Bay Number: ${work['bayNumber']?.toString() ?? 'N/A'}'),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 }

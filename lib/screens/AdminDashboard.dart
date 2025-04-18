@@ -1,325 +1,260 @@
 import 'package:flutter/material.dart';
-import 'package:car_tracking_new/screens/stage_performance.dart';
-import 'package:car_tracking_new/screens/vehicle_count.dart';
-import 'package:car_tracking_new/screens/all_vehicles.dart';
-import 'package:car_tracking_new/screens/filters.dart';
-import 'package:car_tracking_new/screens/section_buttons.dart';
-import 'package:car_tracking_new/screens/api_service.dart';
-import 'package:car_tracking_new/screens/helpers.dart';
-import 'package:car_tracking_new/screens/UserDashboard.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+
+import 'package:car_tracking_new/screens/VehicleSummary.dart';
+import 'package:car_tracking_new/screens/VehicleStagesSummary.dart';
+import 'package:car_tracking_new/screens/LiveStatusScreen.dart';
+import 'package:car_tracking_new/screens/UserList.dart';
+import 'package:car_tracking_new/screens/Dashboard/StageDashboard.dart';  // Importing StageDashboard.dart
 
 class AdminDashboard extends StatefulWidget {
   final String token;
   final VoidCallback onLogout;
 
-  AdminDashboard({required this.token, required this.onLogout});
+  const AdminDashboard({
+    required this.token,
+    required this.onLogout,
+    super.key,
+  });
 
   @override
   _AdminDashboardState createState() => _AdminDashboardState();
 }
 
 class _AdminDashboardState extends State<AdminDashboard> {
-  List<dynamic> avgStageTimes = [];
-  List<dynamic> vehicleCountPerStage = [];
-  List<dynamic> allVehicles = [];
-  int selectedSection = 0;
-  String selectedValue = "all";
   bool isLoading = false;
+  final TextEditingController _searchController = TextEditingController();
+  Map<String, dynamic>? searchedVehicle;
 
-  // Mapping of original stage names to display names
-  final Map<String, String> stageNameMapping = {
-    "Security Gate": "Security IN",  // Maps old name to new display name
-    "Security IN": "Security IN",    // Maps new name consistently
-    "Security Out": "Security Out",
-    "Interactive Bay": "Interactive Bay",
-    "Job Card Creation + Customer Approval": "Job Card Creation + Cust. App.",
-    "Bay Allocation Started": "Bay Allocation",
-    "Bay Work: PM": "Bay Work: PM",
-    "Bay Work: GR": "Bay Work: GR",
-    "Additional Work Job Approval": "Add. Work Appr.",
-    "Final Inspection": "Final Inspection",
-    "Washing": "Washing",
-  };
+  Future<void> fetchVehicleByNumber(String vehicleNumber) async {
+    final trimmedNumber = vehicleNumber.trim().toUpperCase();
+    if (trimmedNumber.isEmpty) return;
 
-  // Function to get display name from mapping
-  String getStageDisplayName(String stageName) {
-    return stageNameMapping[stageName] ?? stageName; // If not found, return original
-  }
-
-  final ApiService _apiService = ApiService();
-
-  final List<String> stageOrder = [
-    "Interactive Bay",
-    "Job Card Creation + Customer Approval", // Original name
-    "Bay Allocation Started", // Original name
-    "Bay Work: PM", // Original name
-    "Bay Work: GR", // Original name
-    "Additional Work Job Approval", // Original name
-    "Final Inspection", // Original name
-    "Washing" // Original name
-  ];
-
-  final List<String> vehicleStageOrder = [
-    "Security Gate",
-    "Interactive Bay",
-    "Job Card Creation + Customer Approval",
-    "Bay Allocation Started",
-    "Bay Work: PM",
-    "Bay Work: GR",
-    "Additional Work Job Approval",
-    "Final Inspection",
-    "Washing"
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    fetchDashboardData();
-  }
-
-  void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-        duration: Duration(seconds: 3),
-      ),
-    );
-  }
-
-  Future<void> fetchDashboardData() async {
     setState(() => isLoading = true);
-
     try {
-      final stageData = await _apiService.fetchStagePerformance(selectedValue);
-      final vehicleCountData = await _apiService.fetchVehicleCountPerStage(selectedValue);
-      final allVehicleData = await _apiService.fetchAllVehicles();
+      final response = await http.get(
+        Uri.parse('https://final-mb-cts.onrender.com/api/vehicles/$trimmedNumber'),
+        headers: {
+          'Authorization': 'Bearer ${widget.token}',
+        },
+      );
 
-      if (stageData != null) {
-        stageData.removeWhere((stage) => stage["stageName"] == "Security Gate");
-        
-
-        // Filter to keep only known stage names
-        final filteredStageData = stageData.where((stage) => stageOrder.contains(stage["stageName"])).toList();
-
-        // Sort the filtered data based on the predefined order
-        filteredStageData.sort((a, b) {
-          int indexA = stageOrder.indexOf(a["stageName"]);
-          int indexB = stageOrder.indexOf(b["stageName"]);
-          return (indexA == -1 ? 999 : indexA).compareTo(indexB == -1 ? 999 : indexB);
-        });
-
-        avgStageTimes = filteredStageData.map((stage) {
-          return {
-            ...stage,
-            'displayName': getStageDisplayName(stage['stageName']), // Use mapping for display names
-          };
-        }).toList();
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() => searchedVehicle = data['vehicle']);
+      } else {
+        setState(() => searchedVehicle = null);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Vehicle not found')),
+        );
       }
-
-      if (vehicleCountData != null) {
-        // Filter to keep only known vehicle stage names
-        final filteredVehicleData = vehicleCountData.where((stage) => vehicleStageOrder.contains(stage["stageName"])).toList();
-
-        // Sort the filtered data based on the predefined order
-        filteredVehicleData.sort((a, b) {
-          int indexA = vehicleStageOrder.indexOf(a["stageName"]);
-          int indexB = vehicleStageOrder.indexOf(b["stageName"]);
-          return (indexA == -1 ? 999 : indexA).compareTo(indexB == -1 ? 999 : indexB);
-        });
-        vehicleCountPerStage = filteredVehicleData.map((stage) {
-          return {
-            ...stage,
-            'displayName': getStageDisplayName(stage['stageName']), // Use mapping for display names
-          };
-        }).toList();
-      }
-
-      setState(() {
-        allVehicles = allVehicleData ?? [];
-        isLoading = false;
-      });
-
     } catch (e) {
+      print("Error: $e");
+      setState(() => searchedVehicle = null);
+    } finally {
       setState(() => isLoading = false);
-      _showErrorSnackBar("Error fetching dashboard data");
-      print("❌ Error fetching dashboard data: $e");
     }
   }
 
+  Future<void> navigateToVehicleSummary() async {
+    setState(() => isLoading = true);
+
+    try {
+      final response = await http.get(
+        Uri.parse('https://final-mb-cts.onrender.com/api/vehicle-summary'),
+        headers: {
+          'Authorization': 'Bearer ${widget.token}',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => Scaffold(
+              backgroundColor: Colors.black,
+              appBar: AppBar(
+                title: const Text("Vehicle Summary", style: TextStyle(color: Colors.white)),
+                backgroundColor: Colors.black,
+              ),
+              body: SingleChildScrollView(
+                child: VehicleSummary(
+                  vehiclesInside: data['vehiclesInside'],
+                  stats: data['stats'],
+                  avgTimeSpent: data['avgTimeSpent'],
+                  longestActive: data['longestActive'],
+                ),
+              ),
+            ),
+          ),
+        );
+      } else {
+        throw Exception('Failed to load summary');
+      }
+    } catch (e) {
+      print("Error fetching vehicle summary: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading summary: $e')),
+      );
+    } finally {
+      setState(() => isLoading = false);
+    }
+  }
+
+  void navigateToVehicleStagesSummary() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => VehicleStagesSummary(token: widget.token),
+      ),
+    );
+  }
+
+  void navigateToLiveStatus() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LiveStatusScreen(token: widget.token),
+      ),
+    );
+  }
+
+  void navigateToUserList() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => UserList(authToken: widget.token),
+      ),
+    );
+  }
+
+  void navigateToStageDashboard() {
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => StageDashboard(authToken: widget.token),  // Pass the authToken here
+    ),
+  );
+}
+
+
   @override
   Widget build(BuildContext context) {
-    // Calculate screen width to determine button width
-    double screenWidth = MediaQuery.of(context).size.width;
-    double buttonWidth = (screenWidth - 40) / 3; // Equal width accounting for padding
-    
-    // Define fixed button styles for each button
-    ButtonStyle blueButtonStyle = ElevatedButton.styleFrom(
-      foregroundColor: Colors.white,
-      backgroundColor: Colors.blueAccent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(15),
-      ),
-      padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-      elevation: 8,
-      shadowColor: Colors.blueAccent.withOpacity(0.5),
-      fixedSize: Size(buttonWidth, 50), // Fixed size for all buttons
-    );
-    
-    ButtonStyle greenButtonStyle = ElevatedButton.styleFrom(
-      foregroundColor: Colors.white,
-      backgroundColor: Colors.greenAccent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(15),
-      ),
-      padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-      elevation: 8,
-      shadowColor: Colors.greenAccent.withOpacity(0.5),
-      fixedSize: Size(buttonWidth, 50), // Fixed size for all buttons
-    );
-    
-    ButtonStyle orangeButtonStyle = ElevatedButton.styleFrom(
-      foregroundColor: Colors.white,
-      backgroundColor: Colors.orangeAccent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(15),
-      ),
-      padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-      elevation: 8,
-      shadowColor: Colors.orangeAccent.withOpacity(0.5),
-      fixedSize: Size(buttonWidth, 50), // Fixed size for all buttons
-    );
-
     return Scaffold(
+      backgroundColor: Colors.black,
       appBar: AppBar(
-        title: Text("Admin Dashboard"),
+        title: const Text("Admin Dashboard", style: TextStyle(color: Colors.white)),
+        backgroundColor: Colors.black,
         actions: [
           IconButton(
-            icon: Icon(Icons.switch_account),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => UserDashboard(
-                    token: widget.token,
-                    onLogout: widget.onLogout,
-                  ),
-                ),
-              );
-            },
-            tooltip: "Go to User Dashboard",
-          ),
-          IconButton(
-            icon: Icon(Icons.refresh),
-            onPressed: fetchDashboardData,
-          ),
-          IconButton(
-            icon: Icon(Icons.logout),
+            icon: const Icon(Icons.logout, color: Colors.white),
             onPressed: widget.onLogout,
           ),
         ],
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: EdgeInsets.all(10),
-            child: SizedBox(
-              width: double.infinity,
-              child: Column(
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: isLoading
+            ? const Center(child: CircularProgressIndicator(color: Colors.white))
+            : Column(
                 children: [
-                  // Place the Buttons in a Row with equal spacing
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween, // Changed to spaceBetween for equal gaps
+                  TextField(
+                    controller: _searchController,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: 'Enter vehicle number',
+                      hintStyle: const TextStyle(color: Colors.grey),
+                      filled: true,
+                      fillColor: Colors.grey[900],
+                      suffixIcon: IconButton(
+                        icon: const Icon(Icons.search, color: Colors.white),
+                        onPressed: () => fetchVehicleByNumber(_searchController.text),
+                      ),
+                    ),
+                  ),
+                  if (searchedVehicle != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      color: Colors.grey[850],
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text("🚗 Vehicle: ${searchedVehicle!['vehicleNumber']}", style: const TextStyle(color: Colors.white)),
+                          Text("📅 Entry Time: ${searchedVehicle!['entryTime']}", style: const TextStyle(color: Colors.white)),
+                          Text("🛑 Exit Time: ${searchedVehicle!['exitTime'] ?? 'Still inside'}", style: const TextStyle(color: Colors.white)),
+                          const SizedBox(height: 5),
+                          const Text("📍 Stages:", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          ...List<Widget>.from((searchedVehicle!['stages'] as List).map((stage) {
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 2.0),
+                              child: Text(
+                                "${stage['timestamp']} - ${stage['eventType']} - ${stage['stageName']}",
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                            );
+                          })),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
                     children: [
-                      // Stage Performance button
                       ElevatedButton(
-                        style: blueButtonStyle,
-                        onPressed: () {
-                          setState(() => selectedSection = 0);
-                        },
-                        child: Container(
-                          width: buttonWidth - 16, // Account for button padding
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              "Stage Performance",
-                              style: TextStyle(fontSize: 16),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
+                        onPressed: navigateToVehicleSummary,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.grey[850],
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                         ),
+                        child: const Text("Vehicle Summary"),
                       ),
-                      
-                      // Vehicle Count button
                       ElevatedButton(
-                        style: greenButtonStyle,
-                        onPressed: () {
-                          setState(() => selectedSection = 1);
-                        },
-                        child: Container(
-                          width: buttonWidth - 16, // Account for button padding
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              "Vehicle Count",
-                              style: TextStyle(fontSize: 16),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
+                        onPressed: navigateToVehicleStagesSummary,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blueGrey,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                         ),
+                        child: const Text("Vehicle Stages"),
                       ),
-                      
-                      // All Vehicles button
                       ElevatedButton(
-                        style: orangeButtonStyle,
-                        onPressed: () {
-                          setState(() => selectedSection = 2);
-                        },
-                        child: Container(
-                          width: buttonWidth - 16, // Account for button padding
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              "All Vehicles",
-                              style: TextStyle(fontSize: 16),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
+                        onPressed: navigateToLiveStatus,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.teal[700],
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                         ),
+                        child: const Text("Live Status"),
+                      ),
+                      ElevatedButton(
+                        onPressed: navigateToUserList,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.purple[700],
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                        ),
+                        child: const Text("User Management"),
+                      ),
+                      ElevatedButton(
+                        onPressed: navigateToStageDashboard,  // Button to navigate to StageDashboard
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange[600],
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                        ),
+                        child: const Text("Stage Dashboard"),  // Text for the button
                       ),
                     ],
-                  ),
-                  SizedBox(height: 10),
-                  Filters(
-                    selectedValue: selectedValue,
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() {
-                          selectedValue = value;
-                          fetchDashboardData();
-                        });
-                      }
-                    },
-                  ),
+                  )
                 ],
               ),
-            ),
-          ),
-          Expanded(
-            child: SingleChildScrollView(
-              padding: EdgeInsets.all(10),
-              child: Builder(builder: (context) {
-                if (selectedSection == 0) {
-                  return StagePerformanceScreen(avgStageTimes: avgStageTimes);
-                } else if (selectedSection == 1) {
-                  return VehicleCountScreen(vehicleCountPerStage: vehicleCountPerStage);
-                } else {
-                  return AllVehiclesScreen(allVehicles: allVehicles);
-                }
-              }),
-            ),
-          ),
-        ],
       ),
     );
   }

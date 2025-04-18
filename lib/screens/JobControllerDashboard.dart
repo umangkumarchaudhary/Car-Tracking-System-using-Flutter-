@@ -5,7 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:animate_do/animate_do.dart';
 import 'qr_scanner_component.dart';
 
-const String baseUrl = 'http://192.168.58.49:5000/api';
+const String baseUrl = 'https://final-mb-cts.onrender.com/api';
 
 class JobControllerDashboard extends StatefulWidget {
   final String token;

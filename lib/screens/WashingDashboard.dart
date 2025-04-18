@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
 // Define the base URL
-const String baseUrl = 'http://192.168.58.49:5000/api';
+const String baseUrl = 'https://final-mb-cts.onrender.com/api';
 
 class WashingDashboard extends StatefulWidget {
   final String token;
@@ -207,7 +207,7 @@ class _WashingDashboardState extends State<WashingDashboard> {
         },
         body: json.encode({
           'vehicleNumber': _vehicleNumberController.text,
-          'role': 'Washing Boy',
+          'role': 'Washing',
           'stageName': 'Washing',
           'eventType': 'Start',
         }),
@@ -264,7 +264,7 @@ class _WashingDashboardState extends State<WashingDashboard> {
         },
         body: json.encode({
           'vehicleNumber': vehicleNumber,
-          'role': 'Washing Boy',
+          'role': 'Washing',
           'stageName': 'Washing',
           'eventType': 'End',
         }),

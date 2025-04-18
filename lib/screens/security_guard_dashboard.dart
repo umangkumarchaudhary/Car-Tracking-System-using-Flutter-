@@ -6,7 +6,7 @@ import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 
-const String BASE_URL = "http://192.168.58.49:5000/api";
+const String BASE_URL = "https://final-mb-cts.onrender.com/api";
 
 class SecurityGuardDashboard extends StatefulWidget {
   final String token;

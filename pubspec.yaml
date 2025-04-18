@@ -27,6 +27,10 @@ dependencies:
   flutter_animate: ^4.5.0
   glassmorphism: ^3.0.0
   lottie: ^2.3.2
+  url_launcher: ^6.2.5
+  connectivity_plus: ^5.0.2
+  another_flushbar: ^1.10.30
+  
   
 
 dev_dependencies:

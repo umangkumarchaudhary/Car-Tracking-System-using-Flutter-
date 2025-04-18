@@ -7,17 +7,17 @@ import 'package:intl/intl.dart';
 // Define the base URL
 const String baseUrl = 'https://final-mb-cts.onrender.com/api';
 
-class PartsTeamDashboard extends StatefulWidget {
+class WorkshopManager extends StatefulWidget {
   final String token;
   final VoidCallback onLogout;
 
-  const PartsTeamDashboard({Key? key, required this.token, required this.onLogout}) : super(key: key);
+  const WorkshopManager({Key? key, required this.token, required this.onLogout}) : super(key: key);
 
   @override
-  _PartsTeamDashboardState createState() => _PartsTeamDashboardState();
+  _WorkshopManagerState createState() => _WorkshopManagerState();
 }
 
-class _PartsTeamDashboardState extends State<PartsTeamDashboard> {
+class _WorkshopManagerState extends State<WorkshopManager> {
   bool isLoading = false;
 
   List<Map<String, dynamic>> inProgressVehicles = [];
@@ -28,7 +28,7 @@ class _PartsTeamDashboardState extends State<PartsTeamDashboard> {
   String? vehicleId;
   bool isCameraOpen = false;
   bool isScanning = false;
-  bool hasStartedEstimate = false; // Tracks if estimate creation has started
+  bool hasStartedChecking = false; // Tracks if checking has started
 
   String convertToIST(String utcTimestamp) {
     final dateFormat = DateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
@@ -81,18 +81,18 @@ class _PartsTeamDashboardState extends State<PartsTeamDashboard> {
           print('🚗 Checking vehicle: $vehicleNumber');
           print('📜 Stages: $stages');
 
-          final List<dynamic> partsStages = stages
-              .where((stage) => stage['stageName'] == 'Creation of Parts Estimate')
+          final List<dynamic> checkingStages = stages
+              .where((stage) => stage['stageName'] == 'Checked')
               .toList();
 
-          print('🔍 Parts Estimate Stages for $vehicleNumber: $partsStages');
+          print('🔍 Checked Stages for $vehicleNumber: $checkingStages');
 
-          if (partsStages.isNotEmpty) {
-            final lastEvent = partsStages.last;
+          if (checkingStages.isNotEmpty) {
+            final lastEvent = checkingStages.last;
             final String lastEventType = lastEvent['eventType'];
-            final String startTime = convertToIST(partsStages.first['timestamp']);
-            final String? endTime = (partsStages.length > 1)
-                ? convertToIST(partsStages.last['timestamp'])
+            final String startTime = convertToIST(checkingStages.first['timestamp']);
+            final String? endTime = (checkingStages.length > 1)
+                ? convertToIST(checkingStages.last['timestamp'])
                 : null;
 
             print('📍 Last Event Type: $lastEventType');
@@ -111,7 +111,7 @@ class _PartsTeamDashboardState extends State<PartsTeamDashboard> {
               });
             }
           } else {
-            print('❌ No Parts Estimate stage found for $vehicleNumber');
+            print('❌ No Checked stage found for $vehicleNumber');
           }
         }
 
@@ -144,58 +144,63 @@ class _PartsTeamDashboardState extends State<PartsTeamDashboard> {
         },
       );
 
-      final data = json.decode(response.body);
-      print('Vehicle Details: $data');
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        print('Vehicle Details: $data');
 
-      if (data['success'] == true && data.containsKey('vehicle')) {
-        setState(() {
-          vehicleId = data['vehicle']['_id'];
-          hasStartedEstimate = data['vehicle']['stages'].any((stage) => 
-            stage['stageName'] == 'Creation of Parts Estimate' && stage['eventType'] == 'Start');
-        });
-      } else {
-        print('❌ Vehicle not found');
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            backgroundColor: Colors.grey[900],
-            titleTextStyle: const TextStyle(color: Colors.white, fontSize: 20),
-            contentTextStyle: const TextStyle(color: Colors.white70),
-            title: const Text('No Entry Found'),
-            content: const Text('This vehicle has no previous entry. Do you want to register it as a new vehicle?'),
-            actions: [
-              TextButton(
-                style: TextButton.styleFrom(foregroundColor: Colors.white),
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  backgroundColor: Colors.blueGrey,
+        if (data['success'] == true && data.containsKey('vehicle')) {
+          setState(() {
+            vehicleId = data['vehicle']['_id'];
+            hasStartedChecking = data['vehicle']['stages'].any((stage) => stage['stageName'] == 'Checked' && stage['eventType'] == 'Start');
+          });
+        } else {
+          print('❌ Vehicle not found');
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              backgroundColor: Colors.grey[900],
+              titleTextStyle: const TextStyle(color: Colors.white, fontSize: 20),
+              contentTextStyle: const TextStyle(color: Colors.white70),
+              title: const Text('No Entry Found'),
+              content: const Text('This vehicle has no previous entry. Do you want to register it as a new vehicle?'),
+              actions: [
+                TextButton(
+                  style: TextButton.styleFrom(foregroundColor: Colors.white),
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
                 ),
-                onPressed: () async {
-                  Navigator.pop(context); // Dismiss the dialog
-                  await startPartsEstimate();
-                },
-                child: const Text('Register'),
-              ),
-            ],
-          ),
-        );
+                TextButton(
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    backgroundColor: Colors.blueGrey,
+                  ),
+                  onPressed: () async {
+                    Navigator.pop(context); // Dismiss the dialog
+                    await startChecking();
+                  },
+                  child: const Text('Register'),
+                ),
+              ],
+            ),
+          );
+        }
+      } else {
+        print('Failed to fetch vehicle details. Status code: ${response.statusCode}');
+        // Handle error as needed
       }
     } catch (error) {
       print('❌ Error fetching vehicle details: $error');
     }
   }
 
-  Future<void> startPartsEstimate() async {
+
+  Future<void> startChecking() async {
     if (_vehicleNumberController.text.isEmpty) {
-      print('Start Parts Estimate: No vehicle number entered');
+      print('Start Checking: No vehicle number entered');
       return;
     }
 
-    print('Starting parts estimate for: ${_vehicleNumberController.text}');
+    print('Starting checking for: ${_vehicleNumberController.text}');
     setState(() => isLoading = true);
 
     final url = Uri.parse('$baseUrl/vehicle-check');
@@ -208,42 +213,42 @@ class _PartsTeamDashboardState extends State<PartsTeamDashboard> {
         },
         body: json.encode({
           'vehicleNumber': _vehicleNumberController.text,
-          'role': 'Parts Team',
-          'stageName': 'Creation of Parts Estimate',
+          'role': 'Workshop Manager',
+          'stageName': 'Checked',
           'eventType': 'Start',
         }),
       );
 
       final data = json.decode(response.body);
-      print('Start Parts Estimate Response: $data');
+      print('Start Checking Response: $data');
 
       if (data['success'] == true) {
         vehicleId = data['vehicle']['_id'];
         setState(() {
-          hasStartedEstimate = true; // UPDATE STATE
+          hasStartedChecking = true; // UPDATE STATE
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Parts Estimate creation started')),
+          const SnackBar(content: Text('Checking started')),
         );
       } else {
-        print('❌ Start Parts Estimate Error: ${data['message']}');
+        print('❌ Start Checking Error: ${data['message']}');
 
         if (data['message']?.contains('already started') == true) {
-          print('🔄 Parts Estimate already started, refreshing details...');
+          print('🔄 Checking already started, refreshing details...');
           await fetchVehicleDetails(_vehicleNumberController.text);
 
           setState(() {
-            hasStartedEstimate = true;
+            hasStartedChecking = true;
           });
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(data['message'] ?? 'Failed to start parts estimate')),
+            SnackBar(content: Text(data['message'] ?? 'Failed to start checking')),
           );
         }
       }
     } catch (error) {
-      print('Error starting Parts Estimate: $error');
+      print('Error starting Checking: $error');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Error processing vehicle start')),
       );
@@ -252,8 +257,8 @@ class _PartsTeamDashboardState extends State<PartsTeamDashboard> {
     }
   }
 
-  Future<void> endPartsEstimateForVehicle(String vehicleNumber) async {
-    print('Ending Parts Estimate for: $vehicleNumber');
+  Future<void> endCheckingForVehicle(String vehicleNumber) async {
+    print('Ending Checking for: $vehicleNumber');
 
     final url = Uri.parse('$baseUrl/vehicle-check');
     try {
@@ -265,29 +270,28 @@ class _PartsTeamDashboardState extends State<PartsTeamDashboard> {
         },
         body: json.encode({
           'vehicleNumber': vehicleNumber,
-          'role': 'Parts Team',
-          'stageName': 'Creation of Parts Estimate',
+          'role': 'Workshop Manager',
+          'stageName': 'Checked',
           'eventType': 'End',
         }),
       );
 
       final data = json.decode(response.body);
-      print('End Parts Estimate Response: $data');
+      print('End Checking Response: $data');
 
       if (data['success'] == true) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Parts Estimate completed for $vehicleNumber')),
+          SnackBar(content: Text('Checking completed for $vehicleNumber')),
         );
         setState(() {
-          hasStartedEstimate = false; // RESET STATE AFTER ENDING
+          hasStartedChecking = false; // RESET STATE AFTER ENDING
         });
-
         fetchAllVehicles();
       } else {
-        print('❌ End Parts Estimate Error: ${data['message']}');
+        print('❌ End Checking Error: ${data['message']}');
       }
     } catch (error) {
-      print('Error ending Parts Estimate: $error');
+      print('Error ending Checking: $error');
     }
   }
 
@@ -328,7 +332,7 @@ class _PartsTeamDashboardState extends State<PartsTeamDashboard> {
       backgroundColor: Colors.grey[900],
       appBar: AppBar(
         backgroundColor: Colors.black87,
-        title: const Text('Parts Team Dashboard', style: TextStyle(color: Colors.white)),
+        title: const Text('Workshop Manager', style: TextStyle(color: Colors.white)),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
@@ -400,7 +404,7 @@ class _PartsTeamDashboardState extends State<PartsTeamDashboard> {
             const SizedBox(height: 20),
 
             // Conditionally render "Start" or "End" button
-            (vehicleId != null && hasStartedEstimate)
+            (vehicleId != null && hasStartedChecking)
                 ? ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       foregroundColor: Colors.white,
@@ -409,13 +413,13 @@ class _PartsTeamDashboardState extends State<PartsTeamDashboard> {
                       textStyle: const TextStyle(fontSize: 18),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
-                    onPressed: isLoading ? null : () => endPartsEstimateForVehicle(_vehicleNumberController.text),
+                    onPressed: isLoading ? null : () => endCheckingForVehicle(_vehicleNumberController.text),
                     child: isLoading
                         ? const SizedBox(
                             height: 24,
                             width: 24,
                             child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white)))
-                        : const Text('End Estimate'),
+                        : const Text('End Checking'),
                   )
                 : ElevatedButton(
                     style: ElevatedButton.styleFrom(
@@ -425,119 +429,128 @@ class _PartsTeamDashboardState extends State<PartsTeamDashboard> {
                       textStyle: const TextStyle(fontSize: 18),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
-                    onPressed: isLoading ? null : startPartsEstimate,
+                    onPressed: isLoading ? null : startChecking,
                     child: isLoading
                         ? const SizedBox(
                             height: 24,
                             width: 24,
                             child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white)))
-                        : const Text('Start Estimate'),
+                        : const Text('Start Checking'),
                   ),
-            const SizedBox(height: 30),
+            const SizedBox(height: 20),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 TextButton(
-                  style: TextButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    backgroundColor: showInProgress ? Colors.blueGrey : Colors.transparent,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                    textStyle: const TextStyle(fontSize: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  onPressed: () {
+                    setState(() {
+                      showInProgress = true;
+                    });
+                  },
+                  child: Text(
+                    'In-Progress',
+                    style: TextStyle(
+                      fontSize: 18,
+                      color: showInProgress ? Colors.blueAccent : Colors.white70,
+                    ),
                   ),
-                  onPressed: () => setState(() => showInProgress = true),
-                  child: const Text('In-Progress', style: TextStyle(color: Colors.white)),
                 ),
                 TextButton(
-                  style: TextButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    backgroundColor: !showInProgress ? Colors.blueGrey : Colors.transparent,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                    textStyle: const TextStyle(fontSize: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  onPressed: () {
+                    setState(() {
+                      showInProgress = false;
+                    });
+                  },
+                  child: Text(
+                    'Finished',
+                    style: TextStyle(
+                      fontSize: 18,
+                      color: !showInProgress ? Colors.blueAccent : Colors.white70,
+                    ),
                   ),
-                  onPressed: () => setState(() => showInProgress = false),
-                  child: const Text('Finished', style: TextStyle(color: Colors.white)),
                 ),
               ],
             ),
-            const SizedBox(height: 20),
             Expanded(
-              child: showInProgress
-                  ? ListView(
-                      children: groupedInProgressVehicles.keys.map((date) {
-                        final vehicles = groupedInProgressVehicles[date]!;
-                        return Column(
-                          children: [
-                            ListTile(
-                              title: Text(date, style: const TextStyle(color: Colors.white)),
-                              trailing: IconButton(
-                                icon: Icon(expanded[date] ?? false ? Icons.expand_less : Icons.expand_more, color: Colors.white70),
-                                onPressed: () {
-                                  setState(() {
-                                    expanded[date] = !(expanded[date] ?? false);
-                                  });
-                                },
-                              ),
-                            ),
-                            if (expanded[date] ?? false)
-                              Column(
-                                children: vehicles.map((vehicle) {
-                                  return Card(
-                                    color: Colors.grey[800],
-                                    margin: const EdgeInsets.symmetric(vertical: 5),
-                                    child: ListTile(
-                                      leading: const Icon(Icons.directions_car, color: Colors.white70),
-                                      title: Text('Vehicle No: ${vehicle['vehicleNumber']}', style: const TextStyle(color: Colors.white)),
-                                      subtitle: Text('Start Time: ${vehicle['startTime']}', style: TextStyle(color: Colors.grey[400])),
-                                    ),
-                                  );
-                                }).toList(),
-                              ),
-                          ],
-                        );
-                      }).toList(),
-                    )
-                  : ListView(
-                      children: groupedFinishedVehicles.keys.map((date) {
-                        final vehicles = groupedFinishedVehicles[date]!;
-                        return Column(
-                          children: [
-                            ListTile(
-                              title: Text(date, style: const TextStyle(color: Colors.white)),
-                              trailing: IconButton(
-                                icon: Icon(expanded[date] ?? false ? Icons.expand_less : Icons.expand_more, color: Colors.white70),
-                                onPressed: () {
-                                  setState(() {
-                                    expanded[date] = !(expanded[date] ?? false);
-                                  });
-                                },
-                              ),
-                            ),
-                            if (expanded[date] ?? false)
-                              Column(
-                                children: vehicles.map((vehicle) {
-                                  return Card(
-                                    color: Colors.grey[800],
-                                    margin: const EdgeInsets.symmetric(vertical: 5),
-                                    child: ListTile(
-                                      leading: const Icon(Icons.check_circle_outline, color: Colors.white70),
-                                      title: Text('Vehicle No: ${vehicle['vehicleNumber']}', style: const TextStyle(color: Colors.white)),
-                                      subtitle: Text(
-                                          'Start Time: ${vehicle['startTime']}\nEnd Time: ${vehicle['endTime']}',
-                                          style: TextStyle(color: Colors.grey[400])),
-                                    ),
-                                  );
-                                }).toList(),
-                              ),
-                          ],
-                        );
-                      }).toList(),
-                    ),
+              child: isLoading
+                  ? const Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white)))
+                  : (showInProgress
+                      ? buildVehicleList(groupedInProgressVehicles)
+                      : buildVehicleList(groupedFinishedVehicles)),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget buildVehicleList(Map<String, List<Map<String, dynamic>>> groupedVehicles) {
+    if (groupedVehicles.isEmpty) {
+      return const Center(
+        child: Text(
+          'No vehicles to display.',
+          style: TextStyle(fontSize: 16, color: Colors.white70),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      itemCount: groupedVehicles.length,
+      itemBuilder: (context, index) {
+        final date = groupedVehicles.keys.elementAt(index);
+        final vehicles = groupedVehicles[date]!;
+        bool isExpanded = expanded[date] ?? false;
+
+        return Card(
+          color: Colors.grey[800],
+          margin: const EdgeInsets.symmetric(vertical: 8.0),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          child: ExpansionTile(
+            title: Text(
+              date,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w500,
+                color: Colors.white,
+              ),
+            ),
+            initiallyExpanded: isExpanded,
+            onExpansionChanged: (bool expanding) {
+              setState(() => expanded[date] = expanding);
+            },
+            children: vehicles.map((vehicle) {
+              return ListTile(
+                leading: const Icon(Icons.directions_car, color: Colors.white),
+                title: Text(
+                  vehicle['vehicleNumber'],
+                  style: const TextStyle(
+                    fontSize: 18,
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Start Time: ${vehicle['startTime']}',
+                      style: const TextStyle(fontSize: 14, color: Colors.white70),
+                    ),
+                    if (vehicle['endTime'] != null)
+                      Text(
+                        'End Time: ${vehicle['endTime']}',
+                        style: const TextStyle(fontSize: 14, color: Colors.white70),
+                      ),
+                  ],
+                ),
+                onTap: () {
+                  // Handle vehicle tap
+                },
+              );
+            }).toList(),
+          ),
+        );
+      },
     );
   }
 }

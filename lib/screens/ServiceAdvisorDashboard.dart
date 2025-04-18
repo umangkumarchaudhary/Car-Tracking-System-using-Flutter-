@@ -4,6 +4,8 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:animate_do/animate_do.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 const String baseUrl = 'http://192.168.58.49:5000/api';
 
@@ -31,6 +33,7 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
   final TextEditingController _scannedVehicleController = TextEditingController();
   late AnimationController _animationController;
   Map<String, dynamic> latestSearchedStages = {}; // Store latest timestamp for each stage
+  String trackingLink = ''; // Track N-1 Calling link
 
   @override
   void initState() {
@@ -69,91 +72,110 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
     return latestStages;
   }
 
+  void showFuturisticMessage(String message, {Color color = Colors.cyanAccent}) {
+  final snackBar = SnackBar(
+    content: Text(
+      message,
+      style: const TextStyle(
+        fontFamily: 'Orbitron', // Make sure this font is in pubspec.yaml or use default
+        fontSize: 14,
+        fontWeight: FontWeight.bold,
+        color: Colors.black,
+      ),
+    ),
+    duration: const Duration(seconds: 2),
+    backgroundColor: color.withOpacity(0.9),
+    behavior: SnackBarBehavior.floating,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+  );
+
+  ScaffoldMessenger.of(context).showSnackBar(snackBar);
+}
+
+
   /// Fetch vehicle details and update UI
   Future<void> fetchVehicleDetails(String vehicleNumber, {bool isQRScan = false}) async {
-    setState(() => isLoading = true);
-    _animationController.reset();
-    _animationController.forward();
+  setState(() => isLoading = true);
+  _animationController.reset();
+  _animationController.forward();
+  HapticFeedback.mediumImpact(); // Add subtle feedback
 
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/vehicles/$vehicleNumber'),
-        headers: {
-          'Authorization': 'Bearer ${widget.token}',
-          'Content-Type': 'application/json',
-        },
-      );
+  try {
+    final response = await http.get(
+      Uri.parse('$baseUrl/vehicles/$vehicleNumber'),
+      headers: {
+        'Authorization': 'Bearer ${widget.token}',
+        'Content-Type': 'application/json',
+      },
+    );
 
-      final data = json.decode(response.body);
+    final data = json.decode(response.body);
 
-      if (isQRScan) {
-        // Handle QR Scan case
-        if (data['success'] == true && data.containsKey('vehicle')) {
-          setState(() {
-            vehicleId = data['vehicle']['_id'];
-            this.vehicleNumber = vehicleNumber;
-            _scannedVehicleController.text = vehicleNumber;
-            // Do not set scannedStages or stages here
-            scannedStages = [];
-            stages = [];
-          });
-        } else {
-          // If vehicle doesn't exist, still set the vehicleNumber and clear other data
-          setState(() {
-            vehicleId = null;
-            this.vehicleNumber = vehicleNumber;
-            _scannedVehicleController.text = vehicleNumber;
-            scannedStages = [];
-            stages = []; // Clear stages
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Vehicle not found. Proceeding with the new vehicle entry.'),
-              backgroundColor: Colors.amber,
-            ),
-          );
-        }
+    await Future.delayed(const Duration(milliseconds: 400)); // Smooth UX delay
+
+    if (isQRScan) {
+      if (data['success'] == true && data.containsKey('vehicle')) {
+        setState(() {
+          vehicleId = data['vehicle']['_id'];
+          this.vehicleNumber = vehicleNumber;
+          _scannedVehicleController.text = vehicleNumber;
+          scannedStages = [];
+          stages = [];
+        });
+
+        showFuturisticMessage('Vehicle Found ✔', color: Colors.greenAccent);
       } else {
-        // Handle Search case
-        if (data['success'] == true && data.containsKey('vehicle')) {
-          setState(() {
-            searchedVehicleNumber = vehicleNumber;
-            List<Map<String, dynamic>> allStages = List<Map<String, dynamic>>.from(data['vehicle']['stages']);
-            // Sort all stages in descending order before finding latest
-            allStages.sort((a, b) => b['timestamp'].compareTo(a['timestamp']));
-            latestSearchedStages = findLatestStagesWithEvent(allStages);
-          });
-        } else {
-          setState(() {
-            searchedVehicleNumber = vehicleNumber;
-            latestSearchedStages = {};
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Vehicle not found.'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
+        setState(() {
+          vehicleId = null;
+          this.vehicleNumber = vehicleNumber;
+          _scannedVehicleController.text = vehicleNumber;
+          scannedStages = [];
+          stages = [];
+        });
+
+        showFuturisticMessage(
+          'Vehicle not found. Proceeding with new entry.',
+          color: Colors.amberAccent,
+        );
       }
-      // Common logic to set additionalWorkStages always
-      additionalWorkStages = stages
-          .where((stage) => stage['stageName'] == 'Additional Work Job Approval')
-          .toList();
-      // Sort additionalWorkStages in descending order if needed
-      additionalWorkStages.sort((a, b) => b['timestamp'].compareTo(a['timestamp']));
-    } catch (error) {
-      print('Error fetching vehicle details: $error');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Error fetching vehicle details. Please try again.'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    } finally {
-      setState(() => isLoading = false);
+    } else {
+      if (data['success'] == true && data.containsKey('vehicle')) {
+        setState(() {
+          searchedVehicleNumber = vehicleNumber;
+          List<Map<String, dynamic>> allStages = List<Map<String, dynamic>>.from(data['vehicle']['stages']);
+          allStages.sort((a, b) => b['timestamp'].compareTo(a['timestamp']));
+          latestSearchedStages = findLatestStagesWithEvent(allStages);
+        });
+
+        showFuturisticMessage('Vehicle Loaded ✅', color: Colors.greenAccent);
+      } else {
+        setState(() {
+          searchedVehicleNumber = vehicleNumber;
+          latestSearchedStages = {};
+        });
+
+        showFuturisticMessage('Vehicle not found 🚫', color: Colors.redAccent);
+      }
     }
+
+    // Handle additional work stages
+    additionalWorkStages = stages
+        .where((stage) => stage['stageName'] == 'Additional Work Job Approval')
+        .toList();
+    additionalWorkStages.sort((a, b) => b['timestamp'].compareTo(a['timestamp']));
+  } catch (error) {
+    print('Error fetching vehicle details: $error');
+
+    showFuturisticMessage(
+      'Error fetching details. Please try again ⚠️',
+      color: Colors.deepOrange,
+    );
+  } finally {
+    setState(() => isLoading = false);
   }
+}
+
 
   Future<void> startJobCard() async {
     if (vehicleNumber == null) return;
@@ -300,6 +322,65 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
     }
   }
 
+  Future<void> startN1Calling() async {
+    if (vehicleNumber == null) return;
+    setState(() {
+      isLoading = true;
+    });
+
+    final url = Uri.parse('$baseUrl/vehicle-check');
+    try {
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${widget.token}',
+        },
+        body: json.encode({
+          'vehicleNumber': vehicleNumber,
+          'role': 'Service Advisor',
+          'stageName': 'N-1 Calling',
+          'eventType': 'Start',
+        }),
+      );
+
+      final data = json.decode(response.body);
+
+      if (data['success'] == true) {
+        setState(() {
+          trackingLink = data['trackingLink'] ?? '';
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('N-1 Calling initiated successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        fetchVehicleDetails(vehicleNumber!, isQRScan: true);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(data['message'] ?? 'Failed to initiate N-1 Calling'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (error) {
+      print('Error initiating N-1 Calling: $error');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Error initiating N-1 Calling. Please try again.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() {
+        isLoading = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -411,114 +492,72 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
                                   ),
                                   label: Text(
                                     isCameraOpen ? 'CLOSE SCANNER' : 'SCAN VEHICLE QR',
-                                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500),
                                   ),
                                 ),
                               ),
-                              const SizedBox(height: 15),
-                              if (isCameraOpen)
-                                Container(
-                                  height: 220,
-                                  decoration: BoxDecoration(
-                                    border: Border.all(color: Colors.blue.shade700, width: 3),
-                                    borderRadius: BorderRadius.circular(16),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.blue.withOpacity(0.3),
-                                        spreadRadius: 2,
-                                        blurRadius: 5,
-                                      ),
-                                    ],
+                              const SizedBox(height: 10),
+                              TextField(
+                                enabled: !isCameraOpen,
+                                controller: _scannedVehicleController,
+                                decoration: InputDecoration(
+                                  labelText: 'Vehicle Number',
+                                  labelStyle: const TextStyle(color: Colors.white70),
+                                  prefixIcon: const Icon(Icons.confirmation_number, color: Colors.white70),
+                                  hintText: 'Scan QR code to auto-fill',
+                                  hintStyle: const TextStyle(color: Colors.grey),
+                                  filled: true,
+                                  fillColor: Colors.grey.shade900,
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: const BorderSide(color: Colors.blueAccent, width: 2),
                                   ),
+                                  suffixIcon: IconButton(
+                                    icon: const Icon(Icons.search, color: Colors.white70),
+                                    onPressed: () {
+                                      String scannedVehicleNumber = _scannedVehicleController.text.trim();
+                                      if (scannedVehicleNumber.isNotEmpty) {
+                                        fetchVehicleDetails(scannedVehicleNumber, isQRScan: true);
+                                      } else {
+                                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter vehicle number to search')));
+                                      }
+                                    },
+                                  ),
+                                ),
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                              const SizedBox(height: 10),
+                              if (isCameraOpen)
+                                SizedBox(
+                                  height: 250,
                                   child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(14),
+                                    borderRadius: BorderRadius.circular(12),
                                     child: MobileScanner(
+                                      fit: BoxFit.cover,
                                       onDetect: (capture) {
-                                        final barcodes = capture.barcodes;
-                                        if (barcodes.isNotEmpty) {
-                                          fetchVehicleDetails(barcodes.first.rawValue!, isQRScan: true);
-                                          setState(() => isCameraOpen = false);
+                                        final List<Barcode> barcodes = capture.barcodes;
+                                        for (final barcode in barcodes) {
+                                          String? scannedText = barcode.rawValue;
+                                          if (scannedText != null) {
+                                            setState(() {
+                                              isCameraOpen = false;
+                                              fetchVehicleDetails(scannedText, isQRScan: true);
+                                              _scannedVehicleController.text = scannedText;
+                                            });
+                                            break;
+                                          }
                                         }
                                       },
                                     ),
                                   ),
                                 ),
-                              const SizedBox(height: 20),
-                              TextField(
-                                controller: _scannedVehicleController,
-                                readOnly: true,
-                                style: const TextStyle(color: Colors.white),
-                                decoration: InputDecoration(
-                                  labelText: 'Scanned Vehicle Number',
-                                  labelStyle: const TextStyle(color: Colors.white70),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(color: Colors.white54),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderSide: BorderSide(color: Colors.blue.shade400, width: 2),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  floatingLabelStyle: TextStyle(color: Colors.blue.shade300),
-                                ),
-                              ),
-                              const SizedBox(height: 20),
-                              Wrap(
-                                alignment: WrapAlignment.center,
-                                spacing: 10.0,
-                                runSpacing: 10.0,
-                                children: [
-                                  ElevatedButton.icon(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.green.shade700,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                                      elevation: 8,
-                                    ),
-                                    onPressed: vehicleNumber != null ? startJobCard : null,
-                                    icon: const Icon(Icons.assignment_add, color: Colors.white),
-                                    label: const Text(
-                                      'Start Job Card',
-                                      style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                                    ),
-                                  ),
-                                  ElevatedButton.icon(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.orange.shade700,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                                      elevation: 8,
-                                    ),
-                                    onPressed: vehicleNumber != null ? startAdditionalWork : null,
-                                    icon: const Icon(Icons.build, color: Colors.white),
-                                    label: const Text(
-                                      'Additional Work',
-                                      style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                                    ),
-                                  ),
-                                  ElevatedButton.icon(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.purple.shade700,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                                      elevation: 8,
-                                    ),
-                                    onPressed: vehicleNumber != null ? readyForWashing : null,
-                                    icon: const Icon(Icons.local_car_wash, color: Colors.white),
-                                    label: const Text(
-                                      'Ready for Washing',
-                                      style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                                    ),
-                                  ),
-                                ],
-                              ),
                             ],
                           ),
                         ),
                       ),
                       const SizedBox(height: 20),
-
-                      /// Search Vehicle Section
+                      /// Search Vehicle By Number
                       Card(
                         elevation: 10,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -557,126 +596,39 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
                               const SizedBox(height: 15),
                               TextField(
                                 controller: _searchController,
-                                keyboardType: TextInputType.text,
-                                style: const TextStyle(color: Colors.white),
                                 decoration: InputDecoration(
                                   labelText: 'Enter Vehicle Number',
                                   labelStyle: const TextStyle(color: Colors.white70),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(color: Colors.white54),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
+                                  prefixIcon: const Icon(Icons.confirmation_number, color: Colors.white70),
+                                  hintText: 'Search for vehicle details',
+                                  hintStyle: const TextStyle(color: Colors.grey),
+                                  filled: true,
+                                  fillColor: Colors.grey.shade900,
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
                                   focusedBorder: OutlineInputBorder(
-                                    borderSide: BorderSide(color: Colors.blue.shade400, width: 2),
-                                    borderRadius: BorderRadius.circular(12),
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: const BorderSide(color: Colors.blueAccent, width: 2),
                                   ),
-                                  floatingLabelStyle: TextStyle(color: Colors.blue.shade300),
                                   suffixIcon: IconButton(
-                                    icon: const Icon(Icons.clear, color: Colors.white54),
+                                    icon: const Icon(Icons.search, color: Colors.white70),
                                     onPressed: () {
-                                      _searchController.clear();
-                                      setState(() => searchedVehicleNumber = null);
+                                      String searchVehicleNumber = _searchController.text.trim();
+                                      if (searchVehicleNumber.isNotEmpty) {
+                                        fetchVehicleDetails(searchVehicleNumber);
+                                      } else {
+                                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter vehicle number to search')));
+                                      }
                                     },
                                   ),
                                 ),
+                                style: const TextStyle(color: Colors.white),
                               ),
-                              const SizedBox(height: 20),
-                              Center(
-                                child: ElevatedButton.icon(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.blue.shade700,
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                                    elevation: 8,
-                                  ),
-                                  onPressed: () {
-                                    if (_searchController.text.isNotEmpty) {
-                                      fetchVehicleDetails(_searchController.text);
-                                    }
-                                  },
-                                  icon: const Icon(Icons.search, color: Colors.white, size: 28),
-                                  label: const Text(
-                                    'SEARCH',
-                                    style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 20),
-                              if (searchedVehicleNumber != null) ...[
-                                const Text(
-                                  "Vehicle Stages:",
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                if (latestSearchedStages.isNotEmpty)
-                                  ListView.builder(
-                                    shrinkWrap: true,
-                                    physics: const NeverScrollableScrollPhysics(),
-                                    itemCount: latestSearchedStages.length,
-                                    itemBuilder: (context, index) {
-                                      String key = latestSearchedStages.keys.elementAt(index);
-                                      var stage = latestSearchedStages[key];
-                                      return FadeIn(
-                                        duration: Duration(milliseconds: 200 + (index * 100)),
-                                        child: Card(
-                                          color: Colors.grey.shade700,
-                                          elevation: 5,
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                          margin: const EdgeInsets.symmetric(vertical: 5),
-                                          child: Padding(
-                                            padding: const EdgeInsets.all(12.0),
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  key,
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontWeight: FontWeight.w600,
-                                                    fontSize: 15,
-                                                  ),
-                                                ),
-                                                const SizedBox(height: 5),
-                                                Wrap(
-                                                  children: [
-                                                    Text(
-                                                      'Timestamp: ${convertToIST(stage['timestamp'])}',
-                                                      style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
-                                                    ),
-                                                    const SizedBox(width: 10),
-                                                    Text(
-                                                      'Role: ${stage['role']}',
-                                                      style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  )
-                                else
-                                  const Padding(
-                                    padding: EdgeInsets.symmetric(vertical: 10),
-                                    child: Text(
-                                      "No stages found for this vehicle.",
-                                      style: TextStyle(color: Colors.white70, fontStyle: FontStyle.italic),
-                                    ),
-                                  ),
-                              ],
                             ],
                           ),
                         ),
                       ),
                       const SizedBox(height: 20),
-
-                      /// Additional Work Section
+                      /// Stages Section
                       Card(
                         elevation: 10,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -695,84 +647,237 @@ class _ServiceAdvisorDashboardState extends State<ServiceAdvisorDashboard> with 
                                       borderRadius: BorderRadius.circular(10),
                                     ),
                                     child: const Icon(
-                                      Icons.build,
+                                      Icons.list_alt,
                                       color: Colors.white,
                                       size: 24,
                                     ),
                                   ),
-                                  const SizedBox(width: 5),
+                                  const SizedBox(width: 10),
                                   const Text(
-                                    "ADDITIONAL WORK STATUS",
+                                    "ACTIONS",
                                     style: TextStyle(
                                       color: Colors.white,
                                       fontWeight: FontWeight.bold,
-                                      fontSize: 12,
+                                      fontSize: 18,
                                     ),
                                   ),
                                 ],
                               ),
                               const Divider(color: Colors.white54, thickness: 1),
                               const SizedBox(height: 15),
-                              if (additionalWorkStages.isNotEmpty)
-                                ListView.builder(
-                                  shrinkWrap: true,
-                                  physics: const NeverScrollableScrollPhysics(),
-                                  itemCount: additionalWorkStages.length,
-                                  itemBuilder: (context, index) {
-                                    var stage = additionalWorkStages[index];
-                                    return FadeIn(
-                                      duration: Duration(milliseconds: 200 + (index * 100)),
-                                      child: Card(
-                                        color: Colors.grey.shade700,
-                                        elevation: 5,
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                        margin: const EdgeInsets.symmetric(vertical: 5),
-                                        child: Padding(
-                                          padding: const EdgeInsets.all(12.0),
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                '${stage['stageName']} (${stage['eventType']})',
-                                                style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontWeight: FontWeight.w600,
-                                                  fontSize: 15,
+                              Wrap(
+                                alignment: WrapAlignment.center,
+                                spacing: 10,
+                                runSpacing: 10,
+                                children: [
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.green.shade700,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                      elevation: 8,
+                                    ),
+                                    onPressed: (vehicleNumber != null && latestSearchedStages['Job Card Creation + Customer Approval (Start)'] == null) ? startJobCard : null,
+                                    icon: const Icon(Icons.assignment, color: Colors.white),
+                                    label: const Text(
+                                      'START JOB CARD',
+                                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+                                    ),
+                                  ),
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.orange.shade700,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                      elevation: 8,
+                                    ),
+                                    onPressed: vehicleNumber != null ? startAdditionalWork : null,
+                                    icon: const Icon(Icons.add_task, color: Colors.white),
+                                    label: const Text(
+                                      'ADDITIONAL WORK',
+                                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+                                    ),
+                                  ),
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.purple.shade700,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                      elevation: 8,
+                                    ),
+                                    onPressed: vehicleNumber != null ? readyForWashing : null,
+                                    icon: const Icon(Icons.local_car_wash, color: Colors.white),
+                                    label: const Text(
+                                      'READY FOR WASHING',
+                                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+                                    ),
+                                  ),
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.blue.shade700,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                      elevation: 8,
+                                    ),
+                                    onPressed: vehicleNumber != null ? startN1Calling : null,
+                                    icon: const Icon(Icons.phone, color: Colors.white),
+                                    label: const Text(
+                                      'N-1 CALLING',
+                                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (trackingLink.isNotEmpty)
+                                FadeInUp(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    children: [
+                                      const SizedBox(height: 15),
+                                      Container(
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.shade700,
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            const Text(
+                                              "Tracking Link:",
+                                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500, fontSize: 16),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Row(
+                                              children: [
+                                                Expanded(
+                                                  child: InkWell(
+                                                    onTap: () async {
+                                                      final Uri url = Uri.parse(trackingLink);
+                                                      if (await canLaunchUrl(url)) {
+                                                        await launchUrl(url);
+                                                      } else {
+                                                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Cannot launch URL")));
+                                                      }
+                                                    },
+                                                    child: Text(
+                                                      trackingLink,
+                                                      style: const TextStyle(
+                                                        color: Colors.lightBlueAccent,
+                                                        decoration: TextDecoration.underline,
+                                                        fontSize: 16,
+                                                      ),
+                                                    ),
+                                                  ),
                                                 ),
-                                              ),
-                                              const SizedBox(height: 5),
-                                              Wrap(
-                                                children: [
-                                                  Text(
-                                                    'Timestamp: ${convertToIST(stage['timestamp'])}',
-                                                    style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
-                                                  ),
-                                                  const SizedBox(width: 10),
-                                                  Text(
-                                                    'Role: ${stage['role']}',
-                                                    style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
-                                                  ),
-                                                ],
-                                              ),
-                                            ],
-                                          ),
+                                                IconButton(
+                                                  icon: const Icon(Icons.copy, color: Colors.white),
+                                                  onPressed: () {
+                                                    Clipboard.setData(ClipboardData(text: trackingLink));
+                                                    ScaffoldMessenger.of(context).showSnackBar(
+                                                      const SnackBar(content: Text('Tracking link copied to clipboard')),
+                                                    );
+                                                  },
+                                                ),
+                                              ],
+                                            ),
+                                          ],
                                         ),
                                       ),
-                                    );
-                                  },
-                                )
-                              else
-                                const Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 10),
-                                  child: Text(
-                                    "No additional work updates found for this vehicle.",
-                                    style: TextStyle(color: Colors.white70, fontStyle: FontStyle.italic),
+                                    ],
                                   ),
                                 ),
                             ],
                           ),
                         ),
                       ),
+
+                      const SizedBox(height: 20),
+                      /// Vehicle Details Section
+                      if (searchedVehicleNumber != null)
+                        FadeInUp(
+                          child: Card(
+                            elevation: 10,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                            color: Colors.grey.shade800,
+                            child: Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.blue.shade700,
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
+                                        child: const Icon(
+                                          Icons.info,
+                                          color: Colors.white,
+                                          size: 24,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      const Text(
+                                        "LATEST VEHICLE STATUS",
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 18,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const Divider(color: Colors.white54, thickness: 1),
+                                  const SizedBox(height: 15),
+                                  if (latestSearchedStages.isNotEmpty)
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                                      children: latestSearchedStages.entries.map((entry) {
+                                        final stageName = entry.value['stageName'];
+                                        final eventType = entry.value['eventType'];
+                                        final timestamp = convertToIST(entry.value['timestamp']);
+
+                                        return Padding(
+                                          padding: const EdgeInsets.symmetric(vertical: 8.0),
+                                          child: Container(
+                                            padding: const EdgeInsets.all(12),
+                                            decoration: BoxDecoration(
+                                              color: Colors.grey.shade700,
+                                              borderRadius: BorderRadius.circular(10),
+                                            ),
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  '$stageName - $eventType',
+                                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500, fontSize: 16),
+                                                ),
+                                                const SizedBox(height: 5),
+                                                Text(
+                                                  'Timestamp: $timestamp',
+                                                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        );
+                                      }).toList(),
+                                    )
+                                  else
+                                    const Center(
+                                      child: Text(
+                                        'No stages found for this vehicle.',
+                                        style: TextStyle(color: Colors.white70, fontSize: 16),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),

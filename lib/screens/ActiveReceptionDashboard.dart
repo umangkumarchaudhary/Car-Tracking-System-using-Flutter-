@@ -3,485 +3,455 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
-// Define the base URL
-const String baseUrl = 'http://192.168.58.49:5000/api';
+// Constants
+const String baseUrl = 'https://final-mb-cts.onrender.com/api';
+const Duration apiTimeout = Duration(seconds: 15);
+const Duration scanLockDuration = Duration(seconds: 2);
 
 class ActiveReceptionDashboard extends StatefulWidget {
   final String token;
   final VoidCallback onLogout;
 
-  const ActiveReceptionDashboard({Key? key, required this.token, required this.onLogout}) : super(key: key);
+  const ActiveReceptionDashboard({
+    Key? key,
+    required this.token,
+    required this.onLogout,
+  }) : super(key: key);
 
   @override
   _ActiveReceptionDashboardState createState() => _ActiveReceptionDashboardState();
 }
 
 class _ActiveReceptionDashboardState extends State<ActiveReceptionDashboard> {
-  bool isLoading = false;
+  // State variables
+  bool _isLoading = false;
+  bool _isProfileLoading = false;
+  bool _isReceptionActive = false;
+  bool _isCameraOpen = false;
+  bool _isScanning = false;
+  bool _isStartButtonPressed = false;
 
-  List<Map<String, dynamic>> inProgressVehicles = [];
-  List<Map<String, dynamic>> finishedVehicles = [];
-
+  List<Map<String, dynamic>> _inProgressVehicles = [];
+  List<Map<String, dynamic>> _finishedVehicles = [];
   final TextEditingController _vehicleNumberController = TextEditingController();
-
-  String? vehicleId;
-  bool isReceptionActive = false;
-  bool isCameraOpen = false;
-  bool isScanning = false; // Prevent multiple QR scans
-  bool isStartButtonPressed = false; // Flag to track if start button is pressed
-  
-  // User profile data
-  Map<String, dynamic> userProfile = {};
-  bool isProfileLoading = false;
+  String? _vehicleId;
+  Map<String, dynamic> _userProfile = {};
 
   @override
   void initState() {
     super.initState();
-    // ✅ Check vehicle status after login
-    fetchAllVehicles(); // Load vehicles when dashboard opens
+    _initializeApp();
   }
 
-  String convertToIST(String utcTimestamp) {
-    final dateFormat = DateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
-    final utcTime = dateFormat.parseUTC(utcTimestamp);
-    final istTime = utcTime.add(Duration(hours: 5, minutes: 30)); // IST is UTC+5:30
-    return DateFormat('dd-MM-yyyy hh:mm a').format(istTime); // Format as per your requirement
+  Future<void> _initializeApp() async {
+    if (await _checkInternetConnection()) {
+      await _fetchAllVehicles();
+    }
   }
 
-  // Handle QR Code Scanning
-  void handleQRCode(String code) async {
-    if (isScanning) return; // Prevent multiple scans
-    isScanning = true; // Lock scanning
+  Future<bool> _checkInternetConnection() async {
+    final connectivityResult = await Connectivity().checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No internet connection')),
+        );
+      }
+      return false;
+    }
+    return true;
+  }
 
-    print('QR Code Scanned: $code');
+  String _convertToIST(String? utcTimestamp) {
+    if (utcTimestamp == null || utcTimestamp.isEmpty) return 'N/A';
+    
+    try {
+      final dateFormat = DateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
+      final utcTime = dateFormat.parseUTC(utcTimestamp);
+      final istTime = utcTime.add(const Duration(hours: 5, minutes: 30));
+      return DateFormat('dd-MM-yyyy hh:mm a').format(istTime);
+    } catch (e) {
+      debugPrint('Date parsing error: $e');
+      return 'Invalid Date';
+    }
+  }
+
+  Future<void> _handleQRCode(String code) async {
+    if (_isScanning) return;
+    
     setState(() {
+      _isScanning = true;
       _vehicleNumberController.text = code;
-      isCameraOpen = false; // Close camera after successful scan
+      _isCameraOpen = false;
     });
 
-    // Check vehicle status in Interactive Bay
-    await checkVehicleInteractiveBayStatus(code);
-
-    Future.delayed(Duration(seconds: 2), () => isScanning = false); // Unlock scanning
-  }
-
-  bool requestInProgress = false; // Prevent duplicate requests
-
-  // Fetch user profile data
-  Future<void> fetchUserProfile() async {
-    setState(() => isProfileLoading = true);
-    final url = Uri.parse('$baseUrl/profile');
-    print('🔄 Fetching user profile from: $url');
-
     try {
-      final response = await http.get(
-        url,
-        headers: {
-          'Authorization': 'Bearer ${widget.token}',
-          'Content-Type': 'application/json',
-        },
-      );
-
-      print('📩 Profile API Response Status Code: ${response.statusCode}');
-
-      final data = json.decode(response.body);
-
-      if (data['success'] == true && data.containsKey('profile')) {
-        setState(() {
-          userProfile = data['profile'];
-        });
-        print('✅ User profile fetched: $userProfile');
-      } else {
-        print('❌ Unexpected API response format or "profile" key missing');
-      }
-    } catch (error) {
-      print('❌ Error fetching user profile: $error');
+      await _checkVehicleInteractiveBayStatus(code);
     } finally {
-      setState(() => isProfileLoading = false);
+      Future.delayed(scanLockDuration, () {
+        if (mounted) setState(() => _isScanning = false);
+      });
     }
   }
 
-  // Show user profile dialog
-    // Show user profile dialog
-  void showProfileDialog() async {
-    await fetchUserProfile(); // Fetch the profile before showing the dialog
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[900],
-        title: Text(
-          'User Profile',
-          style: TextStyle(
-            color: Colors.white,
-            fontFamily: 'MercedesBenz',
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        content: isProfileLoading
-            ? Center(child: CircularProgressIndicator())
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ListTile(
-                    leading: Icon(Icons.person, color: Colors.blue),
-                    title: Text('Name', style: TextStyle(color: Colors.grey)),
-                    subtitle: Text(
-                      userProfile['name'] ?? 'Not available',
-                      style: TextStyle(color: Colors.white),
-                    ),
-                  ),
-                  ListTile(
-                    leading: Icon(Icons.email, color: Colors.blue),
-                    title: Text('Email', style: TextStyle(color: Colors.grey)),
-                    subtitle: Text(
-                      userProfile['email'] ?? 'Not available',
-                      style: TextStyle(color: Colors.white),
-                    ),
-                  ),
-                  ListTile(
-                    leading: Icon(Icons.phone, color: Colors.blue),
-                    title: Text('Mobile', style: TextStyle(color: Colors.grey)),
-                    subtitle: Text(
-                      userProfile['mobile'] ?? 'Not available',
-                      style: TextStyle(color: Colors.white),
-                    ),
-                  ),
-                  ListTile(
-                    leading: Icon(Icons.work, color: Colors.blue),
-                    title: Text('Role', style: TextStyle(color: Colors.grey)),
-                    subtitle: Text(
-                      userProfile['role'] ?? 'Not available',
-                      style: TextStyle(color: Colors.white),
-                    ),
-                  ),
-                ],
-              ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Close', style: TextStyle(color: Colors.blue)),
-          ),
-        ],
-      ),
-    );
-  }
+  Future<void> _fetchUserProfile() async {
+    if (!await _checkInternetConnection()) return;
 
-
-  Future<void> fetchAllVehicles() async {
-    setState(() => isLoading = true);
-    final url = Uri.parse('$baseUrl/vehicles');
-    print('🔄 Fetching all vehicles from: $url');
+    setState(() => _isProfileLoading = true);
 
     try {
       final response = await http.get(
-        url,
-        headers: {
-          'Authorization': 'Bearer ${widget.token}',
-          'Content-Type': 'application/json',
-        },
-      );
+        Uri.parse('$baseUrl/profile'),
+        headers: _buildHeaders(),
+      ).timeout(apiTimeout);
 
-      print('📩 API Response Status Code: ${response.statusCode}');
-      print('📦 Raw API Response: ${response.body}');
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && data['profile'] is Map) {
+          setState(() => _userProfile = data['profile']);
+        } else {
+          _showErrorSnackbar('Invalid profile data format');
+        }
+      } else {
+        _handleApiError(response);
+      }
+    } catch (e) {
+      _handleNetworkError(e);
+    } finally {
+      if (mounted) setState(() => _isProfileLoading = false);
+    }
+  }
 
-      final data = json.decode(response.body);
+  Future<void> _fetchAllVehicles() async {
+    if (!await _checkInternetConnection()) return;
 
-      if (data['success'] == true && data.containsKey('vehicles')) {
-        final List<dynamic> vehicles = data['vehicles'];
-        List<Map<String, dynamic>> inProgress = [];
-        List<Map<String, dynamic>> finished = [];
+    setState(() => _isLoading = true);
 
-        print('✅ Found ${vehicles.length} vehicles in response');
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/vehicles'),
+        headers: _buildHeaders(),
+      ).timeout(apiTimeout);
 
-        for (var vehicle in vehicles) {
-          final String vehicleNumber = vehicle['vehicleNumber'];
-          final List<dynamic> stages = vehicle['stages'];
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && data['vehicles'] is List) {
+          _processVehicleData(data['vehicles']);
+        } else {
+          _showErrorSnackbar('Invalid vehicles data format');
+        }
+      } else {
+        _handleApiError(response);
+      }
+    } catch (e) {
+      _handleNetworkError(e);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
-          print('🚗 Checking vehicle: $vehicleNumber');
-          print('📜 Stages: $stages');
+  void _processVehicleData(List<dynamic> vehicles) {
+    final List<Map<String, dynamic>> inProgress = [];
+    final List<Map<String, dynamic>> finished = [];
 
-          final List<dynamic> interactiveStages = stages
-              .where((stage) => stage['stageName'] == 'Interactive Bay')
-              .toList();
+    for (final vehicle in vehicles) {
+      try {
+        final vehicleNumber = vehicle['vehicleNumber']?.toString() ?? 'Unknown';
+        final stages = (vehicle['stages'] as List?) ?? [];
 
-          print('🔍 Interactive Bay Stages for $vehicleNumber: $interactiveStages');
+        final interactiveStages = stages
+            .where((stage) => stage is Map && stage['stageName'] == 'Interactive Bay')
+            .toList();
 
-          if (interactiveStages.isNotEmpty) {
-            final lastEvent = interactiveStages.last;
-            final String lastEventType = lastEvent['eventType'];
-            final String startTime = convertToIST(interactiveStages.first['timestamp']);
-            final String? endTime = (interactiveStages.length > 1)
-                ? convertToIST(interactiveStages.last['timestamp'])
-                : null;
-            
-            // Get user names from performedBy field
-            final String? startUserName = interactiveStages.first.containsKey('performedBy') ? 
-                interactiveStages.first['performedBy']['userName'] : null;
-            final String? endUserName = (interactiveStages.length > 1 && 
-                interactiveStages.last.containsKey('performedBy')) ? 
-                interactiveStages.last['performedBy']['userName'] : null;
+        if (interactiveStages.isNotEmpty) {
+          final lastEvent = interactiveStages.last;
+          final lastEventType = lastEvent['eventType']?.toString() ?? 'Unknown';
 
-            print('📍 Last Event Type: $lastEventType');
+          final startTime = _convertToIST(interactiveStages.first['timestamp']?.toString());
+          final endTime = interactiveStages.length > 1 
+              ? _convertToIST(interactiveStages.last['timestamp']?.toString())
+              : null;
 
-            if (lastEventType == 'Start') {
-              inProgress.add({
-                'vehicleNumber': vehicleNumber,
-                'startTime': startTime,
-                'endTime': null,
-                'startUserName': startUserName ?? 'Unknown',
-                'endUserName': null,
-              });
-            } else if (lastEventType == 'End') {
-              finished.add({
-                'vehicleNumber': vehicleNumber,
-                'startTime': startTime,
-                'endTime': endTime,
-                'startUserName': startUserName ?? 'Unknown',
-                'endUserName': endUserName ?? 'Unknown',
-              });
-            }
-          } else {
-            print('❌ No Interactive Bay stage found for $vehicleNumber');
+          final startUserName = _extractUserName(interactiveStages.first);
+          final endUserName = interactiveStages.length > 1 
+              ? _extractUserName(interactiveStages.last)
+              : null;
+
+          if (lastEventType == 'Start') {
+            inProgress.add(_buildVehicleMap(
+              vehicleNumber, startTime, null, startUserName, null,
+            ));
+          } else if (lastEventType == 'End') {
+            finished.add(_buildVehicleMap(
+              vehicleNumber, startTime, endTime, startUserName, endUserName,
+            ));
           }
         }
-
-        setState(() {
-          inProgressVehicles = inProgress;
-          finishedVehicles = finished;
-        });
-        print('🚗 In-Progress Vehicles: $inProgressVehicles');
-        print('✅ Finished Vehicles: $finishedVehicles');
-      } else {
-        print('❌ Unexpected API response format or "vehicles" key missing');
+      } catch (e) {
+        debugPrint('Error processing vehicle: $e');
       }
-    } catch (error) {
-      print('❌ Error fetching vehicles: $error');
-    } finally {
-      setState(() => isLoading = false);
+    }
+
+    if (mounted) {
+      setState(() {
+        _inProgressVehicles = inProgress;
+        _finishedVehicles = finished;
+      });
     }
   }
 
-  Future<void> fetchVehicleDetails(String vehicleNumber) async {
-    final url = Uri.parse('$baseUrl/vehicles/$vehicleNumber'); // Adjust API as needed
-
+  String? _extractUserName(Map<String, dynamic> stage) {
     try {
-      final response = await http.get(
-        url,
-        headers: {
-          'Authorization': 'Bearer ${widget.token}',
-          'Content-Type': 'application/json',
-        },
-      );
-
-      final data = json.decode(response.body);
-      print('Vehicle Details: $data');
-
-      if (data['success'] == true && data.containsKey('vehicle')) {
-        setState(() {
-          vehicleId = data['vehicle']['_id'];
-        });
-      } else {
-        print('❌ Vehicle not found');
-      }
-    } catch (error) {
-      print('❌ Error fetching vehicle details: $error');
+      return stage['performedBy']?['userName']?.toString();
+    } catch (e) {
+      return null;
     }
   }
 
-  Future<void> startReception() async {
+  Map<String, dynamic> _buildVehicleMap(
+    String vehicleNumber,
+    String startTime,
+    String? endTime,
+    String? startUserName,
+    String? endUserName,
+  ) {
+    return {
+      'vehicleNumber': vehicleNumber,
+      'startTime': startTime,
+      'endTime': endTime,
+      'startUserName': startUserName ?? 'Unknown',
+      'endUserName': endUserName ?? 'Unknown',
+    };
+  }
+
+  Future<void> _startReception() async {
     if (_vehicleNumberController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please scan a vehicle QR code first')),
-      );
+      _showErrorSnackbar('Please scan a vehicle QR code first');
       return;
     }
 
-    print('Starting reception for: ${_vehicleNumberController.text}');
-    setState(() => isLoading = true);
+    if (!await _checkInternetConnection()) return;
 
-    final url = Uri.parse('$baseUrl/vehicle-check');
+    setState(() => _isLoading = true);
+
     try {
       final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${widget.token}',
-        },
-        body: json.encode({
+        Uri.parse('$baseUrl/vehicle-check'),
+        headers: _buildHeaders(),
+        body: jsonEncode({
           'vehicleNumber': _vehicleNumberController.text,
           'role': 'Active Reception Technician',
           'stageName': 'Interactive Bay',
           'eventType': 'Start',
         }),
-      );
+      ).timeout(apiTimeout);
 
-      final data = json.decode(response.body);
-      print('Start Reception Response: $data');
-
-      if (data['success'] == true) {
-        vehicleId = data['vehicle']['_id'];
-        setState(() {
-          isStartButtonPressed = true;
-          isReceptionActive = true; // ✅ Show "End Reception" button
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Active Reception started')),
-        );
-        fetchAllVehicles(); // Refresh the list of vehicles
-      } else {
-        print('❌ Start Reception Error: ${data['message']}');
-
-        // ✅ If backend says "already started", refresh details
-        if (data['message']?.contains('already started') == true) {
-          print('🔄 Interactive Bay already started, refreshing details...');
-          await fetchVehicleDetails(_vehicleNumberController.text);
-
-          // ✅ Force update UI after fetching details
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          _vehicleId = data['vehicle']?['_id']?.toString();
           setState(() {
-            isReceptionActive = true; // Ensure "End Reception" button appears
+            _isStartButtonPressed = true;
+            _isReceptionActive = true;
           });
+          _showSuccessSnackbar('Active Reception started');
+          await _fetchAllVehicles();
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(data['message'] ?? 'Failed to start reception')),
-          );
+          _handleReceptionError(data);
         }
+      } else {
+        _handleApiError(response);
       }
-    } catch (error) {
-      print('Error starting reception: $error');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Error processing vehicle start')),
-      );
+    } catch (e) {
+      _handleNetworkError(e);
     } finally {
-      setState(() => isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // End Reception
-  Future<void> endReceptionForVehicle(String vehicleNumber) async {
-    print('Ending reception for: $vehicleNumber');
+  Future<void> _endReceptionForVehicle(String vehicleNumber) async {
+    if (!await _checkInternetConnection()) return;
 
-    final url = Uri.parse('$baseUrl/vehicle-check');
+    setState(() => _isLoading = true);
+
     try {
-      setState(() => isLoading = true);
       final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${widget.token}',
-        },
-        body: json.encode({
+        Uri.parse('$baseUrl/vehicle-check'),
+        headers: _buildHeaders(),
+        body: jsonEncode({
           'vehicleNumber': vehicleNumber,
           'role': 'Active Reception Technician',
           'stageName': 'Interactive Bay',
           'eventType': 'End',
         }),
-      );
+      ).timeout(apiTimeout);
 
-      final data = json.decode(response.body);
-      print('End Reception Response: $data');
-
-      if (data['success'] == true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Active Reception completed for $vehicleNumber')),
-        );
-        // ✅ Refresh vehicle list after completion
-        await fetchAllVehicles();
-        setState(() {
-          isReceptionActive = false;
-          isStartButtonPressed = false;
-          _vehicleNumberController.clear();
-        });
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          _showSuccessSnackbar('Active Reception completed for $vehicleNumber');
+          await _fetchAllVehicles();
+          setState(() {
+            _isReceptionActive = false;
+            _isStartButtonPressed = false;
+            _vehicleNumberController.clear();
+          });
+        } else {
+          _handleReceptionError(data);
+        }
       } else {
-        print('❌ End Reception Error: ${data['message']}');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(data['message'] ?? 'Failed to end reception')),
-        );
+        _handleApiError(response);
       }
-    } catch (error) {
-      print('Error ending reception: $error');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Error processing vehicle end')),
-      );
+    } catch (e) {
+      _handleNetworkError(e);
     } finally {
-      setState(() => isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // Check Vehicle Interactive Bay Status
-  Future<void> checkVehicleInteractiveBayStatus(String vehicleNumber) async {
-    setState(() => isLoading = true);
-    final url = Uri.parse('$baseUrl/vehicles'); // Adjust endpoint if necessary
+  Future<void> _checkVehicleInteractiveBayStatus(String vehicleNumber) async {
+    if (!await _checkInternetConnection()) return;
+
+    setState(() => _isLoading = true);
+
     try {
       final response = await http.get(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${widget.token}',
-        },
-      );
+        Uri.parse('$baseUrl/vehicles'),
+        headers: _buildHeaders(),
+      ).timeout(apiTimeout);
 
-      final data = json.decode(response.body);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && data['vehicles'] is List) {
+          _processVehicleStatus(data['vehicles'], vehicleNumber);
+        } else {
+          _showErrorSnackbar('Invalid vehicle status data');
+        }
+      } else {
+        _handleApiError(response);
+      }
+    } catch (e) {
+      _handleNetworkError(e);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
-      if (data['success'] == true && data.containsKey('vehicles')) {
-        final List<dynamic> vehicles = data['vehicles'];
+  void _processVehicleStatus(List<dynamic> vehicles, String vehicleNumber) {
+    bool foundVehicle = false;
 
-        for (var vehicle in vehicles) {
-          if (vehicle['vehicleNumber'] == vehicleNumber) {
-            final List<dynamic> stages = vehicle['stages'];
-            final List<dynamic> interactiveStages = stages
-                .where((stage) => stage['stageName'] == 'Interactive Bay')
-                .toList();
+    for (final vehicle in vehicles) {
+      if (vehicle['vehicleNumber'] == vehicleNumber) {
+        foundVehicle = true;
+        final stages = (vehicle['stages'] as List?) ?? [];
+        
+        final interactiveStages = stages
+            .where((stage) => stage is Map && stage['stageName'] == 'Interactive Bay')
+            .toList();
 
-            if (interactiveStages.isNotEmpty) {
-              final lastEvent = interactiveStages.last;
-              final String lastEventType = lastEvent['eventType'];
+        if (interactiveStages.isNotEmpty) {
+          final lastEvent = interactiveStages.last;
+          final lastEventType = lastEvent['eventType']?.toString();
 
-              if (lastEventType == 'Start') {
-                // Vehicle is in progress
-                setState(() {
-                  isStartButtonPressed = true;
-                  isReceptionActive = true;
-                });
-                return; // Exit the function as status is found
-              }
-            }
-            break; // Vehicle found, exit the loop
+          if (lastEventType == 'Start') {
+            setState(() {
+              _isStartButtonPressed = true;
+              _isReceptionActive = true;
+            });
+            return;
           }
         }
-        // If loop completes without finding vehicle in "Start" state
-        setState(() {
-          isStartButtonPressed = false;
-          isReceptionActive = false;
-        });
-      } else {
-        print('❌ Error checking vehicle status: ${data['message']}');
-        setState(() {
-          isStartButtonPressed = false;
-          isReceptionActive = false;
-        });
+        break;
       }
-    } catch (error) {
-      print('❌ Error checking vehicle status: $error');
-      setState(() {
-        isStartButtonPressed = false;
-        isReceptionActive = false;
-      });
-    } finally {
-      setState(() => isLoading = false);
+    }
+
+    setState(() {
+      _isStartButtonPressed = false;
+      _isReceptionActive = false;
+    });
+
+    if (!foundVehicle) {
+      _showErrorSnackbar('Vehicle not found');
+    }
+  }
+
+  Map<String, String> _buildHeaders() {
+    return {
+      'Authorization': 'Bearer ${widget.token}',
+      'Content-Type': 'application/json',
+    };
+  }
+
+  void _handleReceptionError(Map<String, dynamic> data) {
+    final message = data['message']?.toString() ?? 'Reception operation failed';
+    if (message.contains('already started')) {
+      _fetchVehicleDetails(_vehicleNumberController.text);
+      setState(() => _isReceptionActive = true);
+    } else {
+      _showErrorSnackbar(message);
+    }
+  }
+
+  Future<void> _fetchVehicleDetails(String vehicleNumber) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/vehicles/$vehicleNumber'),
+        headers: _buildHeaders(),
+      ).timeout(apiTimeout);
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          setState(() => _vehicleId = data['vehicle']?['_id']?.toString());
+        }
+      }
+    } catch (e) {
+      debugPrint('Error fetching vehicle details: $e');
+    }
+  }
+
+  void _handleApiError(http.Response response) {
+    final statusCode = response.statusCode;
+    final message = 'API Error: $statusCode';
+    _showErrorSnackbar(message);
+  }
+
+  void _handleNetworkError(Object error) {
+    debugPrint('Network error: $error');
+    _showErrorSnackbar('Network error occurred');
+  }
+
+  void _showErrorSnackbar(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _showSuccessSnackbar(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.green,
+        ),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final screenSize = MediaQuery.of(context).size;
-
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
-        title: Text(
+        title: const Text(
           "Interactive Bay Reception",
           style: TextStyle(
             color: Colors.white,
@@ -491,17 +461,17 @@ class _ActiveReceptionDashboardState extends State<ActiveReceptionDashboard> {
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.refresh, color: Colors.white),
-            onPressed: fetchAllVehicles,
+            icon: const Icon(Icons.refresh, color: Colors.white),
+            onPressed: _fetchAllVehicles,
             tooltip: 'Refresh Vehicle Data',
           ),
           IconButton(
-            icon: Icon(Icons.account_circle, color: Colors.white),
-            onPressed: showProfileDialog,
+            icon: const Icon(Icons.account_circle, color: Colors.white),
+            onPressed: _showProfileDialog,
             tooltip: 'Profile',
           ),
           IconButton(
-            icon: Icon(Icons.logout, color: Colors.white),
+            icon: const Icon(Icons.logout, color: Colors.white),
             onPressed: widget.onLogout,
             tooltip: 'Logout',
           ),
@@ -509,238 +479,275 @@ class _ActiveReceptionDashboardState extends State<ActiveReceptionDashboard> {
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Scanner Section
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.grey[900],
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.blue.withOpacity(0.3),
-                        blurRadius: 8,
-                        offset: Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              icon: Icon(
-                                isCameraOpen ? Icons.camera_alt : Icons.qr_code_scanner,
-                                size: 20,
-                              ),
-                              label: Text(
-                                isCameraOpen ? 'Close Scanner' : 'Scan Vehicle QR',
-                                style: TextStyle(fontSize: 14),
-                              ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: isCameraOpen ? Colors.red[700] : Colors.blue[700],
-                                foregroundColor: Colors.white,
-                                padding: EdgeInsets.symmetric(vertical: 12),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                elevation: 3,
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  isCameraOpen = !isCameraOpen;
-                                });
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: 10),
-                      // QR Scanner View
-                      if (isCameraOpen)
-                        Container(
-                          height: 200,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.blue, width: 2),
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(6),
-                            child: MobileScanner(
-                              fit: BoxFit.cover,
-                              onDetect: (capture) {
-                                final List<Barcode> barcodes = capture.barcodes;
-                                if (barcodes.isNotEmpty && barcodes.first.rawValue != null) {
-                                  handleQRCode(barcodes.first.rawValue!);
-                                }
-                              },
-                            ),
-                          ),
-                        ),
-                      SizedBox(height: 10),
-                      // Vehicle Number Display
-                      TextField(
-                        controller: _vehicleNumberController,
-                        readOnly: true,
-                        style: TextStyle(color: Colors.white),
-                        decoration: InputDecoration(
-                          labelText: 'Scanned Vehicle No',
-                          labelStyle: TextStyle(color: Colors.grey[400]),
-                          enabledBorder: OutlineInputBorder(
-                            borderSide: BorderSide(color: Colors.grey[700]!, width: 1),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderSide: BorderSide(color: Colors.blue, width: 2),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                SizedBox(height: 20),
-                // Start/End Reception Button
-                ElevatedButton(
-                  onPressed: isLoading
-                      ? null
-                      : () async {
-                          if (!isStartButtonPressed) {
-                            await startReception();
-                          } else {
-                            await endReceptionForVehicle(_vehicleNumberController.text);
-                          }
-                        },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: isStartButtonPressed ? Colors.red[700] : Colors.green[700],
-                    foregroundColor: Colors.white,
-                    padding: EdgeInsets.symmetric(vertical: 14),
-                    textStyle: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    elevation: 5,
-                  ),
-                  child: isLoading
-                      ? CircularProgressIndicator(
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                        )
-                      : Text(isStartButtonPressed ? 'End Interactive Bay' : 'Start Interactive Bay'),
-                ),
-                SizedBox(height: 30),
-                // In-Progress Vehicles Section
-                Text(
-                  'Vehicles in Interactive Bay',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    fontFamily: 'MercedesBenz',
-                  ),
-                ),
-                SizedBox(height: 10),
-                inProgressVehicles.isEmpty
-                    ? Text('No vehicles currently in Interactive Bay.', style: TextStyle(color: Colors.grey[400]))
-                    : ListView.builder(
-                        shrinkWrap: true,
-                        physics: NeverScrollableScrollPhysics(),
-                        itemCount: inProgressVehicles.length,
-                        itemBuilder: (context, index) {
-                          final vehicle = inProgressVehicles[index];
-                          return Container(
-                            margin: EdgeInsets.symmetric(vertical: 5),
-                            decoration: BoxDecoration(
-                              color: Colors.grey[800],
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: ListTile(
-                              leading: Icon(Icons.directions_car, color: Colors.blue[300]),
-                              title: Text(vehicle['vehicleNumber'], style: TextStyle(color: Colors.white)),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Start Time: ${vehicle['startTime']}',
-                                    style: TextStyle(color: Colors.grey[400]),
-                                  ),
-                                  Text(
-                                    'Started By: ${vehicle['startUserName']}',
-                                    style: TextStyle(color: Colors.grey[400]),
-                                  ),
-                                ],
-                              ),
-                              isThreeLine: true,
-                            ),
-                          );
-                        },
-                      ),
-                SizedBox(height: 20),
-                // Finished Vehicles Section
-                Text(
-                  'Completed Vehicles',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    fontFamily: 'MercedesBenz',
-                  ),
-                ),
-                SizedBox(height: 10),
-                finishedVehicles.isEmpty
-                    ? Text('No vehicles have completed Interactive Bay.', style: TextStyle(color: Colors.grey[400]))
-                    : ListView.builder(
-                        shrinkWrap: true,
-                        physics: NeverScrollableScrollPhysics(),
-                        itemCount: finishedVehicles.length,
-                        itemBuilder: (context, index) {
-                          final vehicle = finishedVehicles[index];
-                          return Container(
-                            margin: EdgeInsets.symmetric(vertical: 5),
-                            decoration: BoxDecoration(
-                              color: Colors.grey[800],
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: ListTile(
-                              leading: Icon(Icons.check_circle, color: Colors.green[300]),
-                              title: Text(vehicle['vehicleNumber'], style: TextStyle(color: Colors.white)),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Start: ${vehicle['startTime']}',
-                                    style: TextStyle(color: Colors.grey[400]),
-                                  ),
-                                  Text(
-                                    'Started By: ${vehicle['startUserName']}',
-                                    style: TextStyle(color: Colors.grey[400]),
-                                  ),
-                                  Text(
-                                    'End: ${vehicle['endTime']}',
-                                    style: TextStyle(color: Colors.grey[400]),
-                                  ),
-                                  Text(
-                                    'Ended By: ${vehicle['endUserName']}',
-                                    style: TextStyle(color: Colors.grey[400]),
-                                  ),
-                                ],
-                              ),
-                              isThreeLine: true,
-                            ),
-                          );
-                        },
-                      ),
-              ],
-            ),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildScannerSection(),
+              const SizedBox(height: 20),
+              _buildReceptionButton(),
+              const SizedBox(height: 30),
+              _buildVehicleLists(),
+            ],
           ),
         ),
       ),
     );
+  }
+
+  Widget _buildScannerSection() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.grey[900],
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.blue.withOpacity(0.3),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ElevatedButton.icon(
+            icon: Icon(
+              _isCameraOpen ? Icons.camera_alt : Icons.qr_code_scanner,
+              size: 20,
+            ),
+            label: Text(
+              _isCameraOpen ? 'Close Scanner' : 'Scan Vehicle QR',
+              style: const TextStyle(fontSize: 14),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _isCameraOpen ? Colors.red[700] : Colors.blue[700],
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+            ),
+            onPressed: () => setState(() => _isCameraOpen = !_isCameraOpen),
+          ),
+          const SizedBox(height: 10),
+          if (_isCameraOpen)
+            Container(
+              height: 200,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue, width: 2),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: MobileScanner(
+                  fit: BoxFit.cover,
+                  onDetect: (capture) {
+                    final barcodes = capture.barcodes;
+                    if (barcodes.isNotEmpty && barcodes.first.rawValue != null) {
+                      _handleQRCode(barcodes.first.rawValue!);
+                    }
+                  },
+                ),
+              ),
+            ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _vehicleNumberController,
+            readOnly: true,
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              labelText: 'Scanned Vehicle No',
+              labelStyle: TextStyle(color: Colors.grey[400]),
+              enabledBorder: OutlineInputBorder(
+                borderSide: BorderSide(color: Colors.grey[700]!, width: 1),
+              ),
+              focusedBorder: const OutlineInputBorder(
+                borderSide: BorderSide(color: Colors.blue, width: 2),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReceptionButton() {
+    return ElevatedButton(
+      onPressed: _isLoading
+          ? null
+          : () async {
+              if (!_isStartButtonPressed) {
+                await _startReception();
+              } else {
+                await _endReceptionForVehicle(_vehicleNumberController.text);
+              }
+            },
+      style: ElevatedButton.styleFrom(
+        backgroundColor: _isStartButtonPressed ? Colors.red[700] : Colors.green[700],
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+      ),
+      child: _isLoading
+          ? const CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+            )
+          : Text(_isStartButtonPressed ? 'End Interactive Bay' : 'Start Interactive Bay'),
+    );
+  }
+
+  Widget _buildVehicleLists() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildVehicleListSection(
+          title: 'Vehicles in Interactive Bay',
+          vehicles: _inProgressVehicles,
+          emptyText: 'No vehicles currently in Interactive Bay',
+          icon: Icons.directions_car,
+          iconColor: Colors.blue[300]!,
+        ),
+        const SizedBox(height: 20),
+        _buildVehicleListSection(
+          title: 'Completed Vehicles',
+          vehicles: _finishedVehicles,
+          emptyText: 'No vehicles have completed Interactive Bay',
+          icon: Icons.check_circle,
+          iconColor: Colors.green[300]!,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildVehicleListSection({
+    required String title,
+    required List<Map<String, dynamic>> vehicles,
+    required String emptyText,
+    required IconData icon,
+    required Color iconColor,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+            fontFamily: 'MercedesBenz',
+          ),
+        ),
+        const SizedBox(height: 10),
+        vehicles.isEmpty
+            ? Text(emptyText, style: TextStyle(color: Colors.grey[400]))
+            : ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: vehicles.length,
+                itemBuilder: (context, index) => _buildVehicleListItem(
+                  vehicles[index],
+                  icon,
+                  iconColor,
+                ),
+              ),
+      ],
+    );
+  }
+
+  Widget _buildVehicleListItem(
+    Map<String, dynamic> vehicle,
+    IconData icon,
+    Color iconColor,
+  ) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.grey[800],
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: ListTile(
+        leading: Icon(icon, color: iconColor),
+        title: Text(
+          vehicle['vehicleNumber']?.toString() ?? 'Unknown',
+          style: const TextStyle(color: Colors.white),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Start Time: ${vehicle['startTime']}',
+              style: TextStyle(color: Colors.grey[400]),
+            ),
+            Text(
+              'Started By: ${vehicle['startUserName']}',
+              style: TextStyle(color: Colors.grey[400]),
+            ),
+            if (vehicle['endTime'] != null) ...[
+              Text(
+                'End: ${vehicle['endTime']}',
+                style: TextStyle(color: Colors.grey[400]),
+              ),
+              Text(
+                'Ended By: ${vehicle['endUserName']}',
+                style: TextStyle(color: Colors.grey[400]),
+              ),
+            ],
+          ],
+        ),
+        isThreeLine: true,
+      ),
+    );
+  }
+
+  void _showProfileDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: const Text(
+          'User Profile',
+          style: TextStyle(
+            color: Colors.white,
+            fontFamily: 'MercedesBenz',
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: _isProfileLoading
+            ? const Center(child: CircularProgressIndicator())
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildProfileItem(Icons.person, 'Name', _userProfile['name']),
+                  _buildProfileItem(Icons.email, 'Email', _userProfile['email']),
+                  _buildProfileItem(Icons.phone, 'Mobile', _userProfile['mobile']),
+                  _buildProfileItem(Icons.work, 'Role', _userProfile['role']),
+                ],
+              ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close', style: TextStyle(color: Colors.blue)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProfileItem(IconData icon, String title, dynamic value) {
+    return ListTile(
+      leading: Icon(icon, color: Colors.blue),
+      title: Text(title, style: TextStyle(color: Colors.grey)),
+      subtitle: Text(
+        value?.toString() ?? 'Not available',
+        style: const TextStyle(color: Colors.white),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _vehicleNumberController.dispose();
+    super.dispose();
   }
 }

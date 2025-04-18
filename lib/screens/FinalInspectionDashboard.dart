@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
 // Define the base URL
-const String baseUrl = 'http://192.168.58.49:5000/api';
+const String baseUrl = 'https://final-mb-cts.onrender.com/api';
 
 class FinalInspectionDashboard extends StatefulWidget {
   final String token;
@@ -33,12 +33,21 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
   bool showInProgress = true;
   Map<String, bool> expanded = {};
 
-  // Convert UTC to IST
-  String convertToIST(String utcTimestamp) {
-    final dateFormat = DateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
-    final utcTime = dateFormat.parseUTC(utcTimestamp);
-    final istTime = utcTime.add(const Duration(hours: 5, minutes: 30));
-    return DateFormat('dd-MM-yyyy hh:mm a').format(istTime);
+  // Convert UTC to IST with null check
+  String convertToIST(String? utcTimestamp) {
+    if (utcTimestamp == null || utcTimestamp.isEmpty) {
+      return 'N/A';
+    }
+    
+    try {
+      final dateFormat = DateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
+      final utcTime = dateFormat.parseUTC(utcTimestamp);
+      final istTime = utcTime.add(const Duration(hours: 5, minutes: 30));
+      return DateFormat('dd-MM-yyyy hh:mm a').format(istTime);
+    } catch (e) {
+      print('Error parsing timestamp: $e');
+      return 'N/A';
+    }
   }
 
   // Handle QR Code Scanning
@@ -257,42 +266,53 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
   }
 
   Future<void> endReceptionForVehicle(String vehicleNumber) async {
-    print('Ending Final Inspection for: $vehicleNumber');
+  print('Ending Final Inspection for: $vehicleNumber');
+  setState(() => isLoading = true); // Add loading state
 
-    final url = Uri.parse('$baseUrl/vehicle-check');
-    try {
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${widget.token}',
-        },
-        body: json.encode({
-          'vehicleNumber': vehicleNumber,
-          'role': 'Final Inspection Technician',
-          'stageName': 'Final Inspection',
-          'eventType': 'End',
-        }),
+  final url = Uri.parse('$baseUrl/vehicle-check');
+  try {
+    final response = await http.post(
+      url,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ${widget.token}',
+      },
+      body: json.encode({
+        'vehicleNumber': vehicleNumber,
+        'role': 'Final Inspection Technician',
+        'stageName': 'Final Inspection',
+        'eventType': 'End',
+      }),
+    );
+
+    final data = json.decode(response.body);
+    print('End Final Inspection Response: $data');
+
+    if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Final Inspection completed for $vehicleNumber')),
       );
-
-      final data = json.decode(response.body);
-      print('End Final Inspection Response: $data');
-
-      if (data['success'] == true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Final Inspection completed for $vehicleNumber')),
-        );
-        setState(() {
-          hasStartedFinalInspection = false;
-        });
-        fetchAllVehicles();
-      } else {
-        print('❌ End Final Inspection Error: ${data['message']}');
-      }
-    } catch (error) {
-      print('Error ending Final Inspection: $error');
+      await fetchAllVehicles(); // Wait for refresh to complete
+      setState(() {
+        hasStartedFinalInspection = false;
+        _vehicleNumberController.clear();
+        vehicleId = null;
+      });
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(data['message'] ?? 'Failed to end inspection')),
+      );
+      print('❌ End Final Inspection Error: ${data['message']}');
     }
+  } catch (error) {
+    print('Error ending Final Inspection: $error');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error ending inspection: $error')),
+    );
+  } finally {
+    setState(() => isLoading = false);
   }
+}
 
   Future<Map<String, dynamic>?> fetchUserProfile() async {
     final url = Uri.parse('$baseUrl/profile');
@@ -345,9 +365,13 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
 
   List<Map<String, dynamic>> sortVehicles(List<Map<String, dynamic>> vehicles) {
     vehicles.sort((a, b) {
-      final DateTime aDate = DateFormat('dd-MM-yyyy hh:mm a').parse(a['startTime']);
-      final DateTime bDate = DateFormat('dd-MM-yyyy hh:mm a').parse(b['startTime']);
-      return bDate.compareTo(aDate);
+      try {
+        final DateTime aDate = DateFormat('dd-MM-yyyy hh:mm a').parse(a['startTime'] ?? '');
+        final DateTime bDate = DateFormat('dd-MM-yyyy hh:mm a').parse(b['startTime'] ?? '');
+        return bDate.compareTo(aDate);
+      } catch (e) {
+        return 0;
+      }
     });
     return vehicles;
   }
@@ -355,11 +379,15 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
   Map<String, List<Map<String, dynamic>>> groupVehiclesByDate(List<Map<String, dynamic>> vehicles) {
     final groupedVehicles = <String, List<Map<String, dynamic>>>{};
     for (var vehicle in vehicles) {
-      final date = DateFormat('dd-MM-yyyy').format(DateFormat('dd-MM-yyyy hh:mm a').parse(vehicle['startTime']));
-      if (!groupedVehicles.containsKey(date)) {
-        groupedVehicles[date] = [];
+      try {
+        final date = DateFormat('dd-MM-yyyy').format(DateFormat('dd-MM-yyyy hh:mm a').parse(vehicle['startTime'] ?? ''));
+        if (!groupedVehicles.containsKey(date)) {
+          groupedVehicles[date] = [];
+        }
+        groupedVehicles[date]!.add(vehicle);
+      } catch (e) {
+        print('Error parsing date: $e');
       }
-      groupedVehicles[date]!.add(vehicle);
     }
     return groupedVehicles;
   }
@@ -395,10 +423,10 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _buildProfileItem('Name', profile['name']),
-                        _buildProfileItem('Email', profile['email']),
-                        _buildProfileItem('Mobile', profile['mobile']),
-                        _buildProfileItem('Role', profile['role']),
+                        _buildProfileItem('Name', profile['name'] ?? 'N/A'),
+                        _buildProfileItem('Email', profile['email'] ?? 'N/A'),
+                        _buildProfileItem('Mobile', profile['mobile']?.toString() ?? 'N/A'),
+                        _buildProfileItem('Role', profile['role'] ?? 'N/A'),
                       ],
                     ),
                     actions: [
@@ -551,7 +579,7 @@ class _FinalInspectionDashboardState extends State<FinalInspectionDashboard> {
                     child: ListTile(
                       leading: Icon(showInProgress ? Icons.directions_car : Icons.check_circle_outline,
                           color: Colors.white70),
-                      title: Text(vehicle['vehicleNumber'], style: const TextStyle(color: Colors.white)),
+                      title: Text(vehicle['vehicleNumber'] ?? 'N/A', style: const TextStyle(color: Colors.white)),
                       subtitle: Text(
                           'Start: ${vehicle['startTime'] ?? 'N/A'} ${showInProgress ? '' : '\nEnd: ${vehicle['endTime'] ?? 'N/A'}'}',
                           style: TextStyle(color: Colors.grey[400])),
